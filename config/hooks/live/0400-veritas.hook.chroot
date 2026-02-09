@@ -1,0 +1,84 @@
+#!/bin/bash
+# Watson OS — Veritas Deepfake Detector Integration
+# 9-method deepfake analysis tool for investigative journalists
+set -e
+
+echo "[WATSON] Installing Veritas deepfake detector..."
+
+VERITAS_DIR="/opt/veritas"
+
+# Veritas files are placed by includes.chroot_after_packages
+# This hook sets up the Python venv and desktop entry
+
+# === Veritas deps installed at first boot (saves ~300MB from ISO) ===
+cat > /usr/local/bin/watson-veritas-setup << 'SETUP'
+#!/bin/bash
+# First-boot Veritas setup — runs once, then disables itself
+VERITAS_DIR="/opt/veritas"
+if [ ! -d "$VERITAS_DIR/.venv" ]; then
+    echo "[WATSON] Setting up Veritas (first boot only)..."
+    python3 -m venv "$VERITAS_DIR/.venv"
+    "$VERITAS_DIR/.venv/bin/pip" install --no-cache-dir \
+        opencv-python-headless numpy yt-dlp pillow mediapipe librosa scipy
+    echo "[WATSON] Veritas ready."
+fi
+SETUP
+chmod +x /usr/local/bin/watson-veritas-setup
+
+# === CLI wrapper ===
+cat > /usr/local/bin/watson-verify << 'VERIFY'
+#!/bin/bash
+# Watson Verify — Veritas deepfake analysis with vault logging
+VERITAS_DIR="/opt/veritas"
+VAULT_MOUNT="$HOME/Investigation"
+VENV="$VERITAS_DIR/.venv/bin/python3"
+
+if [ -z "$1" ]; then
+    echo "Watson Verify — Deepfake Detector"
+    echo ""
+    echo "  watson-verify <video_file>     Analyze local video"
+    echo "  watson-verify <youtube_url>    Download and analyze"
+    echo "  watson-verify --gui            Open graphical interface"
+    echo ""
+    echo "Reports saved to Investigation vault if open."
+    exit 0
+fi
+
+if [ "$1" = "--gui" ]; then
+    cd "$VERITAS_DIR"
+    "$VENV" veritas_gui.py &
+    exit 0
+fi
+
+echo "[*] Analyzing: $1"
+cd "$VERITAS_DIR"
+"$VENV" veritas.py "$@"
+
+# Copy reports to vault if open
+if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+    mkdir -p "$VAULT_MOUNT/evidence/veritas"
+    for f in veritas_report.json veritas_report.html veritas_output.mp4; do
+        if [ -f "$VERITAS_DIR/$f" ]; then
+            STAMP=$(date +%Y%m%d_%H%M%S)
+            cp "$VERITAS_DIR/$f" "$VAULT_MOUNT/evidence/veritas/${STAMP}_${f}"
+            echo "[+] Saved to vault: evidence/veritas/${STAMP}_${f}"
+        fi
+    done
+fi
+VERIFY
+chmod +x /usr/local/bin/watson-verify
+
+# === Desktop entry ===
+cat > /usr/share/applications/veritas.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=Veritas
+Comment=Deepfake detection for investigators
+Exec=/usr/local/bin/watson-verify --gui
+Icon=/opt/veritas/icon.png
+Terminal=false
+Type=Application
+Categories=Utility;Security;
+StartupNotify=true
+DESKTOP
+
+echo "[WATSON] Veritas installed."

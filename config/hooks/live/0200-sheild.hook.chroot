@@ -1,0 +1,126 @@
+#!/bin/bash
+# Watson OS — SHEILD Browser Integration
+# Installs pre-built SHEILD binary + Ghost Mode + vault logging hook
+set -e
+
+echo "[WATSON] Installing SHEILD browser..."
+
+SHEILD_DIR="/opt/sheild"
+mkdir -p "$SHEILD_DIR"
+mkdir -p "$SHEILD_DIR/frontend"
+mkdir -p "$SHEILD_DIR/ghost"
+mkdir -p "$SHEILD_DIR/scripts"
+
+# ============================================
+# SHEILD binary gets copied in by includes.chroot
+# (pre-built release binary at /opt/sheild/sheild)
+# This hook sets up the surrounding system config
+# ============================================
+
+# === Desktop entry (button on the desktop/menu) ===
+cat > /usr/share/applications/sheild.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=SHEILD
+Comment=Private investigation browser
+Exec=/opt/sheild/sheild
+Icon=/opt/sheild/icon.png
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;Security;
+StartupNotify=true
+DESKTOP
+
+# === Set SHEILD as default browser system-wide ===
+update-alternatives --install /usr/bin/x-www-browser x-www-browser /opt/sheild/sheild 200 2>/dev/null || true
+update-alternatives --set x-www-browser /opt/sheild/sheild 2>/dev/null || true
+
+# === Make xdg-open use SHEILD ===
+cat > /usr/local/bin/xdg-open-sheild << 'XDG'
+#!/bin/bash
+# Route all URL opens through SHEILD
+case "$1" in
+    http://*|https://*)
+        /opt/sheild/sheild "$1" &
+        ;;
+    *)
+        /usr/bin/xdg-open.orig "$@"
+        ;;
+esac
+XDG
+chmod +x /usr/local/bin/xdg-open-sheild
+
+# === Default Telescope config (Claude API) ===
+mkdir -p /etc/skel/.sheild
+cat > /etc/skel/.sheild/telescope.toml << 'TOML'
+# Watson OS — AI Provider Configuration
+# Supports any LLM. Pick your provider below.
+#
+# FORMAT OPTIONS:
+#   "anthropic" — Claude (api.anthropic.com)
+#   "openai"    — OpenAI, or any OpenAI-compatible API:
+#                  Ollama (http://localhost:11434/v1/chat/completions)
+#                  LM Studio (http://localhost:1234/v1/chat/completions)
+#                  llama.cpp, vLLM, text-generation-webui, etc.
+#
+# EXAMPLES:
+#
+# --- Claude (recommended) ---
+# endpoint = "https://api.anthropic.com/v1/messages"
+# api_key = "sk-ant-..."
+# model = "claude-sonnet-4-5-20250929"
+# format = "anthropic"
+#
+# --- OpenAI ---
+# endpoint = "https://api.openai.com/v1/chat/completions"
+# api_key = "sk-..."
+# model = "gpt-4o"
+# format = "openai"
+#
+# --- Ollama (local, no API key needed) ---
+# endpoint = "http://localhost:11434/v1/chat/completions"
+# api_key = "none"
+# model = "llama3.1"
+# format = "openai"
+#
+# --- LM Studio (local) ---
+# endpoint = "http://localhost:1234/v1/chat/completions"
+# api_key = "none"
+# model = "local-model"
+# format = "openai"
+#
+# NOTE: Local models keep everything on your machine — no API calls leave.
+# But they need serious hardware (16GB+ RAM for good models).
+# Claude via API is recommended: Anthropic sees your prompt, not the target.
+# The target site never sees you. That's the security model.
+
+[provider]
+endpoint = "https://api.anthropic.com/v1/messages"
+api_key = ""
+model = "claude-sonnet-4-5-20250929"
+format = "anthropic"
+
+[fetch]
+# "sheild"   = Tor fetch -> AI summary (you fetch via Tor, AI analyzes)
+# "vpn"      = VPN fetch -> AI summary (you fetch via VPN, AI analyzes)
+# "ddg"      = DuckDuckGo only (target sees zero traffic from you)
+# "provider" = AI fetches directly (their IP, not yours — Claude recommended)
+mode = "provider"
+max_content_length = 50000
+TOML
+
+# === Ghost Mode setup ===
+# npm install runs at first boot (too heavy for build chroot)
+cat > /etc/skel/.sheild/setup-ghost.sh << 'GHOST'
+#!/bin/bash
+# First-boot Ghost Mode setup
+if [ ! -d /opt/sheild/ghost/node_modules ]; then
+    echo "[SHEILD] Setting up Ghost Mode (first boot only)..."
+    cd /opt/sheild/ghost
+    npm install --production 2>/dev/null
+    npx playwright install chromium 2>/dev/null
+    echo "[SHEILD] Ghost Mode ready."
+fi
+GHOST
+chmod +x /etc/skel/.sheild/setup-ghost.sh
+
+echo "[WATSON] SHEILD browser configured."

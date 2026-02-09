@@ -1,0 +1,52 @@
+#!/bin/bash
+# Watson OS — Ghost Analyst Integration
+# OSINT intelligence analysis platform — drag evidence, AI analyzes
+set -e
+
+echo "[WATSON] Installing Ghost Analyst..."
+
+# === CLI wrapper ===
+cat > /usr/local/bin/watson-analyst << 'ANALYST'
+#!/bin/bash
+# Watson Analyst — OSINT intelligence analysis
+# Drag files in, paste URLs, AI finds patterns
+ANALYST_DIR="/opt/analyst"
+
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "Watson Analyst — AI-Powered OSINT Analysis"
+    echo ""
+    echo "  watson-analyst              Open the analyst GUI"
+    echo "  watson-analyst <file>       Open with evidence file loaded"
+    echo ""
+    echo "Drop files, paste URLs, Ctrl+Enter to analyze."
+    echo "Results saved to ~/Investigation/analyst/"
+    echo "Configure AI provider: ~/.sheild/telescope.toml"
+    exit 0
+fi
+
+cd "$ANALYST_DIR"
+./ghost-analyst "$@" &
+ANALYST
+chmod +x /usr/local/bin/watson-analyst
+
+# === Desktop entry ===
+cat > /usr/share/applications/watson-analyst.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=Watson Analyst
+Comment=OSINT intelligence analysis — drag evidence, AI finds patterns
+Exec=/usr/local/bin/watson-analyst
+Icon=applications-science
+Terminal=false
+Type=Application
+Categories=Utility;Security;
+StartupNotify=true
+DESKTOP
+
+# === GPU rendering deps (wgpu needs Vulkan or GL) ===
+# mesa-vulkan-drivers provides software Vulkan (llvmpipe) as fallback
+# This ensures it works even without dedicated GPU
+apt-get install -y --no-install-recommends \
+    mesa-vulkan-drivers \
+    libvulkan1 2>/dev/null || echo "[WATSON] Vulkan deps may need network"
+
+echo "[WATSON] Ghost Analyst installed."

@@ -1,0 +1,94 @@
+# Watson OS — Base System
+# Debian Bookworm, stripped to essentials
+# NO offensive tools. NO telemetry. NO bloat.
+# Every package here is justified. Nothing extra.
+
+# === Core Desktop (XFCE — minimal) ===
+xfce4-session
+xfce4-panel
+xfce4-settings
+xfce4-terminal
+xfce4-screenshooter
+xfwm4
+xfdesktop4
+thunar
+lightdm
+lightdm-gtk-greeter
+
+# === Display ===
+xserver-xorg-core
+xserver-xorg-input-libinput
+xserver-xorg-video-fbdev
+xserver-xorg-video-vesa
+
+# === Audio/Video (investigators watch research material) ===
+pulseaudio
+vlc
+
+# === Networking — defensive only ===
+network-manager
+network-manager-gnome
+tor
+torsocks
+iptables
+ufw
+
+# === SHEILD Browser (Tauri/WebKit) — runtime deps ===
+# No Firefox. No Chromium. SHEILD is the only browser.
+libwebkit2gtk-4.1-0
+libgtk-3-0
+librsvg2-common
+# Ghost Mode — nodejs only (npm installed standalone at first boot, no 250+ node-* bloat)
+nodejs
+# Playwright system deps (minimal set)
+libgbm1
+libasound2
+libdrm2
+libxcomposite1
+libxrandr2
+libcups2
+
+# === Encryption & Security ===
+cryptsetup
+gnupg
+openssh-client
+keepassxc
+apparmor
+apparmor-utils
+
+# === Filesystem & USB ===
+gvfs
+udisks2
+ntfs-3g
+exfatprogs
+
+# === Session Logging ===
+xdotool
+
+# === Utilities ===
+git
+curl
+wget
+htop
+file
+unzip
+rsync
+bash-completion
+sudo
+
+# === Fonts (one set, readable) ===
+fonts-liberation
+
+# === Python (for Veritas + watson tools) ===
+python3
+python3-pip
+python3-venv
+
+# === Veritas Deepfake Detector — dependencies ===
+ffmpeg
+tesseract-ocr
+python3-tk
+
+# === System (minimal) ===
+firmware-linux-free
+dbus-x11

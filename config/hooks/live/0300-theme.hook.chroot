@@ -1,0 +1,508 @@
+#!/bin/bash
+# Watson OS — Mountain Cabin Theme
+# Warm wood, amber lamplight, dark pines outside
+# Professional enough for a newsroom, warm enough for a 12-hour session
+set -e
+
+echo "[WATSON] Applying cabin theme..."
+
+# ============================================
+# WATSON COLOR PALETTE
+# ============================================
+# cabin_dark    = #0f0e0d   (outside the window — near black, warm)
+# cabin_wood    = #1c1714   (dark wood desk)
+# cabin_panel   = #2a2118   (aged wood panel)
+# cabin_surface = #362b22   (leather journal)
+# cabin_border  = #4a3c30   (wood grain edge)
+# amber_lamp    = #d4a24e   (desk lamp glow)
+# amber_bright  = #e8b84b   (lamp highlight)
+# amber_dim     = #8b6914   (ember / dim warmth)
+# cream_text    = #e8dcc8   (aged paper)
+# cream_dim     = #a89880   (faded ink)
+# pine_dark     = #1a2a1a   (dark forest)
+# blood_select  = #5c2a2a   (burgundy selection — a little scary)
+# fog_gray      = #6b6560   (mountain fog)
+# sage_green    = #5a7a5a   (pine needles, success)
+
+# ============================================
+# 1. GTK3 THEME — Dark Wood
+# ============================================
+mkdir -p /usr/share/themes/Watson/gtk-3.0
+
+cat > /usr/share/themes/Watson/gtk-3.0/gtk.css << 'GTK'
+/* Watson OS — Mountain Cabin */
+
+@define-color theme_bg_color #1c1714;
+@define-color theme_fg_color #e8dcc8;
+@define-color theme_base_color #0f0e0d;
+@define-color theme_text_color #e8dcc8;
+@define-color theme_selected_bg_color #5c2a2a;
+@define-color theme_selected_fg_color #e8dcc8;
+@define-color insensitive_bg_color #2a2118;
+@define-color insensitive_fg_color #6b6560;
+@define-color theme_tooltip_bg_color #2a2118;
+@define-color theme_tooltip_fg_color #e8dcc8;
+@define-color content_view_bg #0f0e0d;
+@define-color borders #4a3c30;
+@define-color unfocused_borders #362b22;
+
+/* Base window */
+window, .background {
+    background-color: #1c1714;
+    color: #e8dcc8;
+}
+
+/* Header bars — dark wood */
+headerbar, .titlebar {
+    background-color: #1c1714;
+    border-bottom: 1px solid #4a3c30;
+    color: #e8dcc8;
+}
+
+/* Buttons */
+button {
+    background-image: linear-gradient(to bottom, #362b22, #2a2118);
+    border: 1px solid #4a3c30;
+    border-radius: 3px;
+    color: #e8dcc8;
+    padding: 4px 12px;
+}
+
+button:hover {
+    background-image: linear-gradient(to bottom, #4a3c30, #362b22);
+    border-color: #d4a24e;
+}
+
+button:active, button:checked {
+    background-color: #5c2a2a;
+    border-color: #d4a24e;
+}
+
+/* Text entries — like writing on paper */
+entry, textview, .view {
+    background-color: #0f0e0d;
+    color: #e8dcc8;
+    border: 1px solid #4a3c30;
+    border-radius: 2px;
+}
+
+entry:focus {
+    border-color: #d4a24e;
+    box-shadow: 0 0 2px rgba(212, 162, 78, 0.3);
+}
+
+/* Selection — burgundy, a little unsettling */
+*:selected, selection {
+    background-color: #5c2a2a;
+    color: #e8dcc8;
+}
+
+/* Scrollbars */
+scrollbar slider {
+    background-color: #4a3c30;
+    border-radius: 4px;
+    min-width: 8px;
+    min-height: 8px;
+}
+
+scrollbar slider:hover {
+    background-color: #d4a24e;
+}
+
+/* Menus */
+menu, .menu, .popup {
+    background-color: #2a2118;
+    border: 1px solid #4a3c30;
+    color: #e8dcc8;
+}
+
+menuitem:hover {
+    background-color: #5c2a2a;
+}
+
+/* Sidebar / tree views */
+.sidebar, treeview {
+    background-color: #1c1714;
+    color: #e8dcc8;
+}
+
+treeview:selected {
+    background-color: #5c2a2a;
+}
+
+/* Tooltips */
+tooltip, .tooltip {
+    background-color: #2a2118;
+    border: 1px solid #4a3c30;
+    color: #d4a24e;
+    border-radius: 3px;
+}
+
+/* Notebooks / tabs */
+notebook header tab {
+    background-color: #2a2118;
+    border: 1px solid #4a3c30;
+    color: #a89880;
+    padding: 4px 12px;
+}
+
+notebook header tab:checked {
+    background-color: #1c1714;
+    border-bottom-color: transparent;
+    color: #d4a24e;
+}
+
+/* Progress bars — amber glow */
+progressbar trough {
+    background-color: #0f0e0d;
+    border: 1px solid #4a3c30;
+    border-radius: 2px;
+}
+
+progressbar progress {
+    background-color: #d4a24e;
+    border-radius: 2px;
+}
+
+/* Links */
+*:link, button.link {
+    color: #d4a24e;
+}
+
+/* Switch */
+switch {
+    background-color: #2a2118;
+    border: 1px solid #4a3c30;
+    border-radius: 12px;
+}
+
+switch:checked {
+    background-color: #5a7a5a;
+}
+
+/* Panels (XFCE) */
+.xfce4-panel {
+    background-color: #0f0e0d;
+    border-top: 1px solid #2a2118;
+    color: #e8dcc8;
+}
+
+.xfce4-panel button {
+    background: transparent;
+    border: none;
+    color: #a89880;
+}
+
+.xfce4-panel button:hover {
+    color: #d4a24e;
+    background-color: rgba(212, 162, 78, 0.1);
+}
+GTK
+
+# GTK2 for older apps
+mkdir -p /usr/share/themes/Watson/gtk-2.0
+cat > /usr/share/themes/Watson/gtk-2.0/gtkrc << 'GTK2'
+gtk-color-scheme = "bg_color:#1c1714\nfg_color:#e8dcc8\nbase_color:#0f0e0d\ntext_color:#e8dcc8\nselected_bg_color:#5c2a2a\nselected_fg_color:#e8dcc8\ntooltip_bg_color:#2a2118\ntooltip_fg_color:#e8dcc8"
+
+style "default" {
+    bg[NORMAL]      = @bg_color
+    bg[PRELIGHT]    = "#362b22"
+    bg[ACTIVE]      = "#5c2a2a"
+    bg[SELECTED]    = @selected_bg_color
+    bg[INSENSITIVE] = "#2a2118"
+
+    fg[NORMAL]      = @fg_color
+    fg[PRELIGHT]    = "#e8dcc8"
+    fg[ACTIVE]      = "#e8dcc8"
+    fg[SELECTED]    = @selected_fg_color
+    fg[INSENSITIVE] = "#6b6560"
+
+    base[NORMAL]      = @base_color
+    base[PRELIGHT]    = "#2a2118"
+    base[ACTIVE]      = "#5c2a2a"
+    base[SELECTED]    = @selected_bg_color
+    base[INSENSITIVE] = "#1c1714"
+
+    text[NORMAL]      = @text_color
+    text[PRELIGHT]    = "#e8dcc8"
+    text[ACTIVE]      = "#e8dcc8"
+    text[SELECTED]    = @selected_fg_color
+    text[INSENSITIVE] = "#6b6560"
+
+    engine "murrine" {
+        roundness = 2
+        gradient_shades = {1.0, 0.95, 0.90, 0.85}
+    }
+}
+class "GtkWidget" style "default"
+GTK2
+
+# XFWM4 window manager theme
+mkdir -p /usr/share/themes/Watson/xfwm4
+cat > /usr/share/themes/Watson/xfwm4/themerc << 'XFWM'
+# Watson window borders — dark wood frame
+active_text_color=#e8dcc8
+active_color_1=#1c1714
+active_color_2=#1c1714
+active_border_color=#4a3c30
+active_shadow_color=#0f0e0d
+
+inactive_text_color=#6b6560
+inactive_color_1=#0f0e0d
+inactive_color_2=#0f0e0d
+inactive_border_color=#2a2118
+inactive_shadow_color=#0f0e0d
+
+title_alignment=center
+title_vertical_offset_active=0
+title_vertical_offset_inactive=0
+button_offset=4
+button_spacing=2
+shadow_delta_height=2
+shadow_delta_width=0
+shadow_delta_x=0
+shadow_delta_y=-2
+shadow_opacity=50
+XFWM
+
+# Theme index
+cat > /usr/share/themes/Watson/index.theme << 'INDEX'
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=Watson
+Comment=Mountain cabin investigator theme
+Encoding=UTF-8
+
+[X-GNOME-Metatheme]
+GtkTheme=Watson
+MetacityTheme=Watson
+IconTheme=Adwaita
+CursorTheme=Adwaita
+ButtonLayout=close,minimize,maximize:
+INDEX
+
+# ============================================
+# 2. XFCE4 TERMINAL — Cabin Terminal
+# ============================================
+mkdir -p /etc/skel/.config/xfce4/terminal
+
+cat > /etc/skel/.config/xfce4/terminal/terminalrc << 'TERM'
+[Configuration]
+FontName=Liberation Mono 11
+MiscAlwaysShowTabs=FALSE
+MiscBell=FALSE
+MiscBellUrgent=FALSE
+MiscBordersDefault=TRUE
+MiscCursorBlinks=TRUE
+MiscCursorShape=TERMINAL_CURSOR_SHAPE_BLOCK
+MiscDefaultGeometry=100x30
+MiscInheritGeometry=FALSE
+MiscMenubarDefault=FALSE
+MiscMouseAutohide=TRUE
+MiscMouseWheelZoom=TRUE
+MiscToolbarDefault=FALSE
+MiscConfirmClose=TRUE
+MiscCycleTabs=TRUE
+MiscTabCloseButtons=TRUE
+MiscTabCloseMiddleClick=TRUE
+MiscTabPosition=GTK_POS_TOP
+MiscHighlightUrls=TRUE
+MiscMiddleClickOpensUri=FALSE
+MiscCopyOnSelect=FALSE
+MiscShowRelaunchDialog=TRUE
+MiscRewrapOnResize=TRUE
+MiscUseShiftArrowsToScroll=FALSE
+MiscSlimTabs=TRUE
+MiscNewTabAdjacent=FALSE
+MiscSearchDialogOpacity=100
+MiscShowUnsafePasteDialog=TRUE
+ScrollingBar=TERMINAL_SCROLLBAR_NONE
+BackgroundMode=TERMINAL_BACKGROUND_TRANSPARENT
+BackgroundDarkness=0.92
+ColorForeground=#e8dcc8
+ColorBackground=#0f0e0d
+ColorCursor=#d4a24e
+ColorCursorUseDefault=FALSE
+ColorSelection=#5c2a2a
+ColorSelectionUseDefault=FALSE
+ColorBold=#d4a24e
+ColorBoldUseDefault=FALSE
+ColorPalette=#0f0e0d;#8b3a3a;#5a7a5a;#d4a24e;#4a6a8a;#7a5a7a;#5a8a8a;#a89880;#6b6560;#b35555;#7aaa7a;#e8b84b;#6a8aaa;#aa7aaa;#7abaaa;#e8dcc8
+TabActivityColor=#d4a24e
+TERM
+
+# ============================================
+# 3. LIGHTDM — Dark cabin entrance
+# ============================================
+cat > /etc/lightdm/lightdm-gtk-greeter.conf << 'LDM'
+[greeter]
+background=/usr/share/watson/boot-splash.jpeg
+theme-name=Watson
+font-name=Liberation Sans 11
+xft-antialias=true
+xft-dpi=96
+xft-hintstyle=slight
+xft-rgba=rgb
+indicators=~host;~spacer;~clock;~spacer;~session;~power
+clock-format=%H:%M  ·  %b %d
+position=50%,center 50%,center
+panel-position=bottom
+active-monitor=0
+LDM
+
+# LightDM autologin — straight to desktop
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/90-watson-autologin.conf << 'AUTO'
+[Seat:*]
+autologin-user=watson
+autologin-user-timeout=0
+user-session=xfce
+greeter-session=lightdm-gtk-greeter
+AUTO
+
+# ============================================
+# 4. WALLPAPER & BOOT — Real images (grandpa's banker's lamp)
+# ============================================
+# Images are placed by includes.chroot_after_packages:
+#   /usr/share/backgrounds/watson-cabin.jpeg  — mountain cabin desk, banker's lamp
+#   /usr/share/watson/boot-splash.jpeg        — noir detective silhouette
+echo "[WATSON] Wallpaper and boot splash images ready."
+
+# ============================================
+# 5. XFCE DEFAULT SETTINGS
+# ============================================
+mkdir -p /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+
+# Desktop settings
+cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml << 'DESKTOP'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitorscreen" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="/usr/share/backgrounds/watson-cabin.jpeg"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
+      </property>
+      <property name="monitorVirtual-1" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="/usr/share/backgrounds/watson-cabin.jpeg"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
+      </property>
+      <property name="monitor0" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="/usr/share/backgrounds/watson-cabin.jpeg"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
+      </property>
+    </property>
+  </property>
+</channel>
+DESKTOP
+
+# Window manager
+cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml << 'WM'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="Watson"/>
+    <property name="title_font" type="string" value="Liberation Sans Bold 10"/>
+    <property name="button_layout" type="string" value="CHM|"/>
+  </property>
+</channel>
+WM
+
+# GTK theme settings
+cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml << 'XSET'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Watson"/>
+    <property name="IconThemeName" type="string" value="Adwaita"/>
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+    <property name="EnableEventSounds" type="bool" value="false"/>
+    <property name="EnableInputFeedbackSounds" type="bool" value="false"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="Antialias" type="int" value="1"/>
+    <property name="HintStyle" type="string" value="hintslight"/>
+    <property name="RGBA" type="string" value="rgb"/>
+    <property name="DPI" type="int" value="96"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="CursorThemeName" type="string" value="Adwaita"/>
+    <property name="FontName" type="string" value="Liberation Sans 10"/>
+    <property name="MonospaceFontName" type="string" value="Liberation Mono 11"/>
+  </property>
+</channel>
+XSET
+
+# Panel — bottom, thin, dark
+cat > /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml << 'PANEL'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=8;x=960;y=1056"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="32"/>
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0.059"/>
+        <value type="double" value="0.055"/>
+        <value type="double" value="0.051"/>
+        <value type="double" value="0.95"/>
+      </property>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/>
+        <value type="int" value="2"/>
+        <value type="int" value="3"/>
+        <value type="int" value="4"/>
+        <value type="int" value="5"/>
+        <value type="int" value="6"/>
+      </property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    <property name="plugin-1" type="string" value="applicationsmenu">
+      <property name="button-title" type="string" value="Watson"/>
+      <property name="show-button-title" type="bool" value="true"/>
+    </property>
+    <property name="plugin-2" type="string" value="separator">
+      <property name="style" type="uint" value="0"/>
+    </property>
+    <property name="plugin-3" type="string" value="tasklist">
+      <property name="flat-buttons" type="bool" value="true"/>
+      <property name="show-labels" type="bool" value="true"/>
+    </property>
+    <property name="plugin-4" type="string" value="separator">
+      <property name="expand" type="bool" value="true"/>
+      <property name="style" type="uint" value="0"/>
+    </property>
+    <property name="plugin-5" type="string" value="systray"/>
+    <property name="plugin-6" type="string" value="clock">
+      <property name="digital-format" type="string" value="%H:%M  ·  %b %d"/>
+    </property>
+  </property>
+</channel>
+PANEL
+
+# ============================================
+# 6. BASH PROMPT — Amber on dark
+# ============================================
+cat >> /etc/skel/.bashrc << 'BASHRC'
+
+# Watson OS prompt — amber lamp on dark wood
+PS1='\[\033[0;33m\]watson\[\033[0;90m\]:\[\033[0;37m\]\w\[\033[0;33m\] ▸ \[\033[0m\]'
+
+# Amber accents for ls
+alias ls='ls --color=auto'
+export LS_COLORS='di=33:ln=36:so=35:pi=33:ex=32:bd=33;40:cd=33;40:su=37;41:sg=30;43:tw=30;42:ow=34;42'
+BASHRC
+
+echo "[WATSON] Theme applied — mountain cabin ready."

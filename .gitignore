@@ -1,0 +1,24 @@
+# Build output
+*.iso
+*.hybrid.iso
+*.files
+*.packages
+chroot/
+binary/
+cache/
+.build/
+local/
+
+# Veritas has its own repo
+veritas/
+
+# Large test data
+
+# Live-build temp
+chroot.files
+chroot.packages.*
+watson-os-amd64.*
+
+# OS junk
+.DS_Store
+Thumbs.db

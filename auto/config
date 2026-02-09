@@ -1,0 +1,32 @@
+#!/bin/sh
+# Watson OS — live-build configuration
+# Pure Debian Bookworm, amd64, hybrid ISO (USB + CD)
+# Explicit Debian mirrors (we're building on Kali, targeting upstream Debian)
+
+lb config noauto \
+    --distribution bookworm \
+    --parent-distribution bookworm \
+    --architectures amd64 \
+    --binary-images iso-hybrid \
+    --bootloaders "syslinux,grub-efi" \
+    --debian-installer none \
+    --memtest none \
+    --apt-indices false \
+    --apt-recommends false \
+    --security true \
+    --updates true \
+    --mirror-bootstrap "http://deb.debian.org/debian" \
+    --mirror-chroot "http://deb.debian.org/debian" \
+    --mirror-chroot-security "http://deb.debian.org/debian-security" \
+    --mirror-binary "http://deb.debian.org/debian" \
+    --mirror-binary-security "http://deb.debian.org/debian-security" \
+    --parent-mirror-bootstrap "http://deb.debian.org/debian" \
+    --parent-mirror-chroot "http://deb.debian.org/debian" \
+    --parent-mirror-chroot-security "http://deb.debian.org/debian-security" \
+    --parent-mirror-binary "http://deb.debian.org/debian" \
+    --parent-mirror-binary-security "http://deb.debian.org/debian-security" \
+    --bootappend-live "boot=live components hostname=watson username=watson live-config.autologin" \
+    --image-name "watson-os" \
+    --iso-application "Watson OS" \
+    --iso-volume "Watson OS" \
+    "${@}"

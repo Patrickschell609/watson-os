@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Watson Console</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --cabin-dark: #0f0e0d;
+      --cabin-wood: #1c1714;
+      --cabin-panel: #2a2118;
+      --cabin-surface: #362b22;
+      --cabin-border: #4a3c30;
+      --amber: #d4a24e;
+      --amber-dim: #8b6914;
+      --cream: #e8dcc8;
+      --cream-dim: #a89880;
+      --burgundy: #5c2a2a;
+      --fog: #6b6560;
+      --sage: #4a7a56;
+    }
+
+    body {
+      background: var(--cabin-dark);
+      color: var(--cream);
+      font-family: 'Liberation Sans', 'DejaVu Sans', sans-serif;
+      font-size: 14px;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== TOP BAR — Buttons ===== */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      height: 40px;
+      background: var(--cabin-wood);
+      border-bottom: 1px solid var(--cabin-border);
+      padding: 0 12px;
+      gap: 8px;
+      -webkit-app-region: drag;
+    }
+
+    #toolbar button {
+      -webkit-app-region: no-drag;
+      background: var(--cabin-panel);
+      border: 1px solid var(--cabin-border);
+      color: var(--cream-dim);
+      padding: 4px 12px;
+      border-radius: 3px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+
+    #toolbar button:hover {
+      border-color: var(--amber);
+      color: var(--cream);
+    }
+
+    #toolbar button.active {
+      background: var(--burgundy);
+      border-color: var(--amber);
+      color: var(--cream);
+    }
+
+    #toolbar .spacer { flex: 1; }
+
+    #toolbar .status {
+      font-size: 11px;
+      color: var(--fog);
+      -webkit-app-region: no-drag;
+    }
+
+    #toolbar .status .dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+
+    #toolbar .status .dot.on { background: var(--sage); }
+    #toolbar .status .dot.off { background: var(--burgundy); }
+
+    /* ===== MAIN AREA — Split panes ===== */
+    #main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* Terminal pane */
+    #terminal-pane {
+      flex: 1;
+      background: var(--cabin-dark);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    #terminal-pane .pane-header {
+      height: 28px;
+      background: var(--cabin-wood);
+      border-bottom: 1px solid var(--cabin-border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      font-size: 11px;
+      color: var(--fog);
+    }
+
+    #terminal {
+      flex: 1;
+      padding: 8px;
+      overflow-y: auto;
+      font-family: 'Liberation Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    #terminal .prompt { color: var(--amber); }
+    #terminal .output { color: var(--cream); }
+    #terminal .error { color: #b35555; }
+    #terminal .system { color: var(--fog); font-style: italic; }
+
+    #terminal-input-line {
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+      background: var(--cabin-wood);
+      border-top: 1px solid var(--cabin-border);
+    }
+
+    #terminal-input-line .prompt-symbol {
+      color: var(--amber);
+      margin-right: 8px;
+      font-family: 'Liberation Mono', monospace;
+      font-size: 13px;
+    }
+
+    #terminal-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--cream);
+      font-family: 'Liberation Mono', monospace;
+      font-size: 13px;
+      outline: none;
+    }
+
+    /* ===== DIVIDER ===== */
+    #divider {
+      width: 3px;
+      background: var(--cabin-border);
+      cursor: col-resize;
+    }
+
+    #divider:hover { background: var(--amber-dim); }
+
+    /* ===== CLAUDE PANE ===== */
+    #claude-pane {
+      width: 380px;
+      min-width: 280px;
+      max-width: 600px;
+      background: var(--cabin-wood);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    #claude-pane .pane-header {
+      height: 28px;
+      background: var(--cabin-panel);
+      border-bottom: 1px solid var(--cabin-border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      font-size: 11px;
+      color: var(--amber);
+    }
+
+    #claude-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 95%;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--cabin-surface);
+      border: 1px solid var(--cabin-border);
+      color: var(--cream);
+    }
+
+    .message.claude {
+      align-self: flex-start;
+      background: var(--cabin-panel);
+      border: 1px solid var(--cabin-border);
+      border-left: 2px solid var(--amber);
+      color: var(--cream);
+    }
+
+    /* Claude input */
+    #claude-input-area {
+      padding: 8px;
+      border-top: 1px solid var(--cabin-border);
+      display: flex;
+      gap: 6px;
+    }
+
+    #claude-input {
+      flex: 1;
+      background: var(--cabin-dark);
+      border: 1px solid var(--cabin-border);
+      color: var(--cream);
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      resize: none;
+      min-height: 36px;
+      max-height: 120px;
+    }
+
+    #claude-input:focus { border-color: var(--amber); }
+
+    #claude-send {
+      background: var(--amber);
+      border: none;
+      color: var(--cabin-dark);
+      padding: 8px 14px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      align-self: flex-end;
+      font-family: inherit;
+    }
+
+    #claude-send:hover { background: #e8b84b; }
+
+    /* ===== SPRITE CONTAINER ===== */
+    #claude-sprite-container {
+      position: absolute;
+      bottom: 60px;
+      right: 12px;
+      cursor: grab;
+      z-index: 10;
+    }
+
+    #claude-sprite-container:active { cursor: grabbing; }
+
+    #claude-sprite-canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    /* ===== BOTTOM STATUS BAR ===== */
+    #statusbar {
+      height: 24px;
+      background: var(--cabin-wood);
+      border-top: 1px solid var(--cabin-border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      font-size: 11px;
+      color: var(--fog);
+      gap: 16px;
+    }
+
+    #statusbar .item { display: flex; align-items: center; gap: 4px; }
+    #statusbar .dot {
+      display: inline-block; width: 5px; height: 5px;
+      border-radius: 50%;
+    }
+    #statusbar .dot.green { background: var(--sage); }
+    #statusbar .dot.red { background: #8b3a3a; }
+    #statusbar .dot.amber { background: var(--amber); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--cabin-border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--amber-dim); }
+  </style>
+</head>
+<body>
+
+  <!-- TOP TOOLBAR — Buttons over shortcuts -->
+  <div id="toolbar">
+    <button onclick="watsonVault('open')">Vault Open</button>
+    <button onclick="watsonVault('close')">Vault Lock</button>
+    <button onclick="watsonVault('status')">Status</button>
+    <span style="color: #4a3c30; margin: 0 4px;">|</span>
+    <button onclick="startRecon()">Recon</button>
+    <button onclick="toggleLog()" id="btn-log">Session Log</button>
+    <div class="spacer"></div>
+    <div class="status">
+      <span class="dot on" id="dot-tor"></span> Tor
+      &nbsp;&nbsp;
+      <span class="dot off" id="dot-vault"></span> Vault
+    </div>
+  </div>
+
+  <!-- MAIN SPLIT -->
+  <div id="main">
+    <!-- TERMINAL -->
+    <div id="terminal-pane">
+      <div class="pane-header">Terminal</div>
+      <div id="terminal">
+        <div class="system">Watson OS — Investigation Console</div>
+        <div class="system">Type commands below. watson-vault, watson-recon, or just bash.</div>
+        <div class="output">&nbsp;</div>
+      </div>
+      <div id="terminal-input-line">
+        <span class="prompt-symbol">watson ▸</span>
+        <input type="text" id="terminal-input" autofocus
+               placeholder="watson-recon, watson-vault, or any command..."
+               spellcheck="false" autocomplete="off">
+      </div>
+    </div>
+
+    <!-- DIVIDER -->
+    <div id="divider"></div>
+
+    <!-- CLAUDE CHAT + SPRITE -->
+    <div id="claude-pane">
+      <div class="pane-header">Claude — Investigation Partner</div>
+
+      <div id="claude-messages">
+        <div class="message claude">
+          I'm here. What are we looking into?
+        </div>
+      </div>
+
+      <!-- SPRITE (draggable) -->
+      <div id="claude-sprite-container">
+        <canvas id="claude-sprite-canvas"></canvas>
+      </div>
+
+      <div id="claude-input-area">
+        <textarea id="claude-input" rows="1"
+                  placeholder="Talk to Claude..."
+                  spellcheck="false"></textarea>
+        <button id="claude-send" onclick="sendToClaude()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATUS BAR -->
+  <div id="statusbar">
+    <div class="item"><span class="dot green" id="stat-tor"></span> Tor connected</div>
+    <div class="item"><span class="dot red" id="stat-vault"></span> Vault locked</div>
+    <div class="item"><span class="dot amber" id="stat-session"></span> Session idle</div>
+    <div style="flex:1"></div>
+    <div class="item" id="stat-clock"></div>
+  </div>
+
+  <script src="claude-sprite.js"></script>
+  <script src="console.js"></script>
+</body>
+</html>

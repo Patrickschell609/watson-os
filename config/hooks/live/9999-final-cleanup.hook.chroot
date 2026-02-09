@@ -1,0 +1,13 @@
+#!/bin/bash
+# Watson OS — Final cleanup (runs LAST after all other hooks)
+# Wipes apt lists and caches that earlier hooks needed
+set -e
+
+echo "[WATSON] Final cleanup..."
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+rm -rf /var/cache/apt/archives/*.deb
+rm -rf /tmp/*
+
+echo "[WATSON] Final cleanup done."

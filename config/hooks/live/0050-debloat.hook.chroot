@@ -1,0 +1,85 @@
+#!/bin/bash
+# Watson OS — Debloat Hook
+# Runs BEFORE hardening. Strips everything investigators don't need.
+# Every byte counts on a live USB.
+set -e
+
+echo "[WATSON] Stripping bloat..."
+
+# === Remove packages that sneak in as dependencies ===
+apt-get purge -y --auto-remove \
+    nano \
+    vim-tiny \
+    vim-common \
+    tasksel \
+    tasksel-data \
+    cron \
+    emacsen-common \
+    dictionaries-common \
+    hunspell-en-us \
+    ispell \
+    wamerican \
+    blt \
+    tk8.6-blt2.5 \
+    dfu-util \
+    firmware-tomu \
+    reportbug \
+    debian-faq \
+    doc-debian \
+    manpages \
+    man-db \
+    info \
+    install-info \
+    2>/dev/null || true
+
+# === Strip docs, man pages, locale data ===
+rm -rf /usr/share/doc/*
+rm -rf /usr/share/man/*
+rm -rf /usr/share/info/*
+rm -rf /usr/share/lintian/*
+rm -rf /usr/share/linda/*
+rm -rf /usr/share/groff/*
+rm -rf /usr/share/bug/*
+
+# Keep only English locale
+find /usr/share/locale -maxdepth 1 -mindepth 1 -type d ! -name 'en' ! -name 'en_US' -exec rm -rf {} + 2>/dev/null || true
+find /usr/share/i18n/locales -type f ! -name 'en_US' ! -name 'en_GB' ! -name 'POSIX' -delete 2>/dev/null || true
+
+# === Prevent docs from being installed in future ===
+cat > /etc/dpkg/dpkg.cfg.d/watson-nodocs << 'NODOCS'
+path-exclude /usr/share/doc/*
+path-exclude /usr/share/man/*
+path-exclude /usr/share/info/*
+path-exclude /usr/share/lintian/*
+path-exclude /usr/share/groff/*
+path-include /usr/share/doc/*/copyright
+NODOCS
+
+# === Strip __pycache__ and .pyc files ===
+find /usr -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+find /usr -name "*.pyc" -delete 2>/dev/null || true
+
+# === Strip unused firmware (keep only common WiFi/GPU) ===
+# We keep: ath9k, iwlwifi, rtl (common laptop WiFi)
+# Everything else is dead weight on a live USB
+find /lib/firmware -maxdepth 1 -mindepth 1 -type d \
+    ! -name 'ath9k_htc' \
+    ! -name 'iwlwifi*' \
+    ! -name 'rtl*' \
+    ! -name 'rtlwifi' \
+    ! -name 'rtw88' \
+    ! -name 'rtw89' \
+    ! -name 'intel' \
+    ! -name 'amd*' \
+    ! -name 'nvidia' \
+    ! -name 'i915' \
+    ! -name 'amdgpu' \
+    -exec rm -rf {} + 2>/dev/null || true
+
+# === Strip unused X video drivers (keep fbdev+vesa+intel+amd+nouveau) ===
+# The -all package installs drivers for ancient hardware nobody uses
+
+# === Remove apt cache (keep lists — later hooks need apt) ===
+apt-get clean
+
+echo "[WATSON] Debloat complete."
