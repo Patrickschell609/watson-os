@@ -2,6 +2,6 @@
 # SHEILD Browser — Placeholder
 # Replace with compiled Tauri binary for production
 echo "SHEILD browser not yet compiled for this build."
-echo "Build from source: cd /home/oday/Desktop/SHEILD && cargo tauri build"
+echo "Build from source: ./build.sh --full (requires Rust toolchain)"
 echo ""
 echo "Watson OS test build — base system verification."

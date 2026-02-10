@@ -236,7 +236,7 @@ usr/
 - `live-build` package installed
 - ~4GB free disk space
 - Root access (live-build runs chroot operations)
-- SHEILD source at `/home/oday/Desktop/SHEILD` (for the full build script)
+- SHEILD source in a sibling directory (for the full build script)
 
 ### Quick build (ISO only, skip SHEILD compile)
 
