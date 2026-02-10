@@ -79,15 +79,38 @@ watson-analyst evidence.pdf          # Open with file loaded
 
 Uses the same Telescope AI config as SHEILD. Results save to `~/Investigation/analyst/`.
 
+### Ghost Code (Text Editor)
+
+Custom GPU-accelerated text editor built with wgpu and Rust. This is the default text editor on Watson OS. No Gedit, no Mousepad, no Vim.
+
+What it does:
+- Syntax highlighting for Python, Rust, JavaScript, Bash, JSON, HTML, CSS, and more
+- Tabbed editing with drag-and-drop file support
+- Full undo/redo, search, select all, clipboard integration
+- Mountain Cabin theme (consistent with the rest of the OS)
+- GPU-rendered text (smooth on any hardware, software Vulkan fallback)
+
+```bash
+ghost-code                    # Open empty editor
+ghost-code notes.md           # Open a file
+ghost-code *.py               # Open multiple files in tabs
+```
+
 ### CLI Tools
 
 | Command | What it does |
 |---------|-------------|
-| `watson-recon` | Structured OSINT data collection |
-| `watson-verify` | Veritas deepfake analysis |
-| `watson-analyst` | AI pattern analysis |
+| `watson-recon` | AI-powered OSINT data collection (Telescope integration) |
+| `watson-verify` | Veritas deepfake analysis (9 methods) |
+| `watson-analyst` | GPU-accelerated AI pattern analysis |
+| `watson-exif` | Image metadata extraction, GPS coordinates, EXIF stripping |
+| `watson-user` | Username search across 35+ platforms via Tor |
+| `watson-domain` | Domain intelligence: DNS, WHOIS, certs, tech detection, subdomains |
+| `watson-archive` | Retrieve deleted web content from Wayback Machine and archive.today |
+| `watson-timeline` | Build investigation timelines from all vault evidence |
 | `watson-log` | Session activity logging |
-| `watson-vault` | Encrypted evidence management |
+| `watson-vault` | LUKS2 encrypted evidence management |
+| `ghost-code` | Text editor with syntax highlighting |
 
 ## Network Security
 
@@ -188,6 +211,7 @@ Watson OS is built with Debian `live-build`. The ISO is assembled through a seri
 | `0300-theme` | Mountain Cabin theme: GTK, terminal, LightDM, wallpaper, bash prompt |
 | `0400-veritas` | Veritas deepfake detector: first-boot venv setup, CLI wrapper, desktop entry |
 | `0500-analyst` | Ghost Analyst: OSINT analysis GUI, Vulkan drivers for GPU rendering |
+| `0600-ghost-code` | Ghost Code: text editor, file associations, default editor |
 | `9999-final-cleanup` | Wipe apt cache and temp files |
 
 Custom binaries and assets are placed via `config/includes.chroot_after_packages/`:
@@ -196,8 +220,10 @@ opt/
   sheild/          SHEILD browser binary + frontend + Ghost Mode
   veritas/         Veritas source (Python + Rust)
   analyst/         ghost-analyst binary (13MB, GPU-accelerated)
+  ghost-code/      Ghost Code text editor (10MB, GPU-accelerated)
 usr/
-  local/bin/       watson-recon, watson-log, watson-vault CLI tools
+  local/bin/       watson-recon, watson-exif, watson-user, watson-domain,
+                   watson-archive, watson-timeline, watson-log, watson-vault
   share/backgrounds/  Mountain cabin wallpaper
   share/watson/       Boot splash
 ```

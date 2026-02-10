@@ -1,0 +1,212 @@
+#!/bin/bash
+# Watson Archive — Retrieve deleted/cached web content
+# Wayback Machine snapshots, Google Cache, archive.today
+# For when the evidence disappears
+
+VAULT_MOUNT="$HOME/Investigation"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+AMBER='\033[0;33m'
+NC='\033[0m'
+
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+
+usage() {
+    echo "Watson Archive — Retrieve Deleted Web Content"
+    echo ""
+    echo "  watson-archive <url>                Find all archived versions"
+    echo "  watson-archive --save <url>         Save current page to Wayback Machine"
+    echo "  watson-archive --latest <url>       Get most recent archived version"
+    echo "  watson-archive --dates <url>        List all snapshot dates"
+    echo "  watson-archive --diff <url>         Compare oldest vs newest snapshot"
+    echo ""
+    echo "Sources: Wayback Machine, archive.today"
+    echo "All requests through Tor. Results saved to vault."
+}
+
+log_to_vault() {
+    local url="$1"
+    local result="$2"
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        local dir="$VAULT_MOUNT/evidence/archives"
+        mkdir -p "$dir"
+        local stamp=$(date +%Y%m%d_%H%M%S)
+        local safe=$(echo "$url" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-60)
+        local outfile="$dir/${stamp}_${safe}.txt"
+        echo "WATSON ARCHIVE LOOKUP" > "$outfile"
+        echo "URL: $url" >> "$outfile"
+        echo "Date: $(date -Iseconds)" >> "$outfile"
+        echo "========================================" >> "$outfile"
+        echo "$result" >> "$outfile"
+        echo -e "${GREEN}[+] Saved to vault${NC} ${GRAY}($outfile)${NC}"
+    fi
+}
+
+wayback_check() {
+    local url="$1"
+    echo -e "${AMBER}Wayback Machine${NC}"
+
+    # CDX API for snapshot listing
+    local cdx
+    cdx=$(torsocks curl -s --max-time 30 \
+        "https://web.archive.org/cdx/search/cdx?url=$url&output=json&limit=20&fl=timestamp,statuscode,digest,length" 2>/dev/null)
+
+    if [ -n "$cdx" ] && [ "$cdx" != "[]" ]; then
+        python3 << PYEOF
+import json, sys
+
+try:
+    data = json.loads('''$cdx''')
+    if len(data) <= 1:
+        print("  No snapshots found")
+        sys.exit()
+
+    headers = data[0]
+    rows = data[1:]
+
+    print(f"  Found {len(rows)} snapshots")
+    print("")
+    print(f"  {'Date':20s} {'Status':8s} {'Size':>10s}")
+    print(f"  {'='*20} {'='*8} {'='*10}")
+
+    for row in rows[-15:]:  # Show last 15
+        ts = row[0]
+        date_fmt = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[8:10]}:{ts[10:12]}"
+        status = row[1] if len(row) > 1 else "?"
+        size = row[3] if len(row) > 3 else "?"
+        print(f"  {date_fmt:20s} {status:8s} {size:>10s}")
+
+    oldest = rows[0][0]
+    newest = rows[-1][0]
+    print(f"\n  Oldest: {oldest[:4]}-{oldest[4:6]}-{oldest[6:8]}")
+    print(f"  Newest: {newest[:4]}-{newest[4:6]}-{newest[6:8]}")
+    print(f"\n  View oldest: https://web.archive.org/web/{oldest}/{url}")
+    print(f"  View newest: https://web.archive.org/web/{newest}/{url}")
+except Exception as e:
+    print(f"  Error parsing: {e}")
+PYEOF
+    else
+        echo "  No Wayback Machine snapshots found for this URL"
+    fi
+    echo ""
+}
+
+wayback_latest() {
+    local url="$1"
+    echo -e "${AMBER}Latest Wayback Snapshot${NC}"
+
+    local result
+    result=$(torsocks curl -s --max-time 20 \
+        "https://archive.org/wayback/available?url=$url" 2>/dev/null)
+
+    python3 << PYEOF
+import json
+try:
+    data = json.loads('''$result''')
+    snap = data.get('archived_snapshots', {}).get('closest', {})
+    if snap:
+        print(f"  URL: {snap.get('url', 'N/A')}")
+        ts = snap.get('timestamp', '')
+        if ts:
+            print(f"  Date: {ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[8:10]}:{ts[10:12]}")
+        print(f"  Status: {snap.get('status', 'N/A')}")
+        print(f"  Available: {snap.get('available', False)}")
+    else:
+        print("  No archived snapshot available")
+except:
+    print("  Could not retrieve archive data")
+PYEOF
+    echo ""
+}
+
+save_to_wayback() {
+    local url="$1"
+    echo -e "${CYAN}[*] Requesting Wayback Machine to save: $url${NC}"
+    echo -e "${GRAY}    This creates a permanent public snapshot${NC}"
+    echo ""
+
+    local result
+    result=$(torsocks curl -s --max-time 60 \
+        -H "User-Agent: $UA" \
+        "https://web.archive.org/save/$url" 2>/dev/null \
+        -o /dev/null -w "%{http_code}|%{redirect_url}")
+
+    local code=$(echo "$result" | cut -d'|' -f1)
+    local redirect=$(echo "$result" | cut -d'|' -f2)
+
+    if [ "$code" = "302" ] || [ "$code" = "200" ]; then
+        echo -e "${GREEN}[+] Page saved to Wayback Machine${NC}"
+        if [ -n "$redirect" ]; then
+            echo "  Snapshot: $redirect"
+        else
+            echo "  Check: https://web.archive.org/web/*/$url"
+        fi
+    else
+        echo -e "${RED}[!] Save request returned HTTP $code${NC}"
+        echo "  The page may still be queued for archival"
+    fi
+    echo ""
+}
+
+archive_today() {
+    local url="$1"
+    echo -e "${AMBER}archive.today${NC}"
+
+    local result
+    result=$(torsocks curl -s --max-time 20 \
+        -H "User-Agent: $UA" \
+        "https://archive.ph/newest/$url" \
+        -o /dev/null -w "%{http_code}|%{redirect_url}" 2>/dev/null)
+
+    local code=$(echo "$result" | cut -d'|' -f1)
+    local redirect=$(echo "$result" | cut -d'|' -f2)
+
+    if [ "$code" = "302" ] && [ -n "$redirect" ]; then
+        echo -e "  ${GREEN}[+] Found on archive.today${NC}"
+        echo "  URL: $redirect"
+    elif [ "$code" = "200" ]; then
+        echo -e "  ${GREEN}[+] Found on archive.today${NC}"
+        echo "  URL: https://archive.ph/newest/$url"
+    else
+        echo "  No archive.today snapshot found"
+    fi
+    echo ""
+}
+
+full_lookup() {
+    local url="$1"
+    echo -e "${CYAN}Watson Archive Report: ${AMBER}$url${NC}"
+    echo -e "${GRAY}All lookups through Tor${NC}"
+    echo ""
+
+    local output=""
+    output+=$(wayback_check "$url" 2>&1)$'\n'
+    output+=$(archive_today "$url" 2>&1)$'\n'
+
+    echo "$output"
+    log_to_vault "$url" "$output"
+}
+
+case "${1:-}" in
+    --save)
+        [ -z "$2" ] && { usage; exit 1; }
+        save_to_wayback "$2"
+        ;;
+    --latest)
+        [ -z "$2" ] && { usage; exit 1; }
+        wayback_latest "$2"
+        ;;
+    --dates)
+        [ -z "$2" ] && { usage; exit 1; }
+        wayback_check "$2"
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        full_lookup "$1"
+        ;;
+esac

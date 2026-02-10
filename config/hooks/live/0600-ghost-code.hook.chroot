@@ -1,0 +1,64 @@
+#!/bin/bash
+# Watson OS — Ghost Code Text Editor
+# GPU-accelerated editor built with wgpu. Mountain Cabin theme.
+# Tabs, syntax highlighting, undo/redo, search, clipboard.
+set -e
+
+echo "[WATSON] Installing Ghost Code..."
+
+# === CLI wrapper ===
+cat > /usr/local/bin/ghost-code << 'WRAPPER'
+#!/bin/bash
+# Ghost Code — Text Editor for Watson OS
+# GPU-rendered, syntax highlighting, Mountain Cabin theme
+CODE_DIR="/opt/ghost-code"
+
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "Ghost Code — Text Editor"
+    echo ""
+    echo "  ghost-code                  Open empty editor"
+    echo "  ghost-code <file>           Open file"
+    echo "  ghost-code <file1> <file2>  Open multiple files in tabs"
+    echo ""
+    echo "Keyboard:"
+    echo "  Ctrl+S  Save    Ctrl+O  Open    Ctrl+N  New tab"
+    echo "  Ctrl+W  Close   Ctrl+F  Find    Ctrl+Z  Undo"
+    echo "  Ctrl+Y  Redo    Ctrl+A  Select  Ctrl+C/V/X  Copy/Paste/Cut"
+    exit 0
+fi
+
+cd "$CODE_DIR"
+./ghost-code "$@" &
+WRAPPER
+chmod +x /usr/local/bin/ghost-code
+
+# === Desktop entry ===
+cat > /usr/share/applications/ghost-code.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=Ghost Code
+Comment=Text editor with syntax highlighting
+Exec=/usr/local/bin/ghost-code %F
+Icon=accessories-text-editor
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;Development;
+StartupNotify=true
+MimeType=text/plain;text/x-python;text/x-rust;text/x-c;text/x-shellscript;application/json;application/xml;text/html;text/css;text/javascript;
+DESKTOP
+
+# === Set as default text editor ===
+update-alternatives --install /usr/bin/editor editor /usr/local/bin/ghost-code 100 2>/dev/null || true
+
+# === File associations ===
+cat > /usr/share/applications/mimeapps-ghost-code.list << 'MIME'
+[Default Applications]
+text/plain=ghost-code.desktop
+text/x-python=ghost-code.desktop
+text/x-shellscript=ghost-code.desktop
+application/json=ghost-code.desktop
+text/html=ghost-code.desktop
+text/css=ghost-code.desktop
+text/javascript=ghost-code.desktop
+MIME
+
+echo "[WATSON] Ghost Code installed."

@@ -1,0 +1,293 @@
+#!/bin/bash
+# Watson Domain — Domain intelligence gathering
+# WHOIS, DNS records, certificate transparency, tech detection
+# All through Tor. No direct contact with target needed for most checks.
+
+VAULT_MOUNT="$HOME/Investigation"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+AMBER='\033[0;33m'
+NC='\033[0m'
+
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+
+usage() {
+    echo "Watson Domain — Domain Intelligence"
+    echo ""
+    echo "  watson-domain <domain>              Full domain report"
+    echo "  watson-domain --dns <domain>        DNS records only"
+    echo "  watson-domain --certs <domain>      Certificate transparency logs"
+    echo "  watson-domain --whois <domain>      WHOIS lookup"
+    echo "  watson-domain --headers <domain>    HTTP headers and tech detection"
+    echo "  watson-domain --subs <domain>       Subdomain discovery (passive)"
+    echo ""
+    echo "All lookups route through Tor. Results saved to vault."
+}
+
+log_to_vault() {
+    local domain="$1"
+    local result="$2"
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        local dir="$VAULT_MOUNT/evidence/domains"
+        mkdir -p "$dir"
+        local stamp=$(date +%Y%m%d_%H%M%S)
+        local safe=$(echo "$domain" | tr '/' '_')
+        local outfile="$dir/${stamp}_${safe}.txt"
+        echo "WATSON DOMAIN REPORT" > "$outfile"
+        echo "Target: $domain" >> "$outfile"
+        echo "Date: $(date -Iseconds)" >> "$outfile"
+        echo "========================================" >> "$outfile"
+        echo "$result" >> "$outfile"
+        echo -e "${GREEN}[+] Saved to vault${NC} ${GRAY}($outfile)${NC}"
+    fi
+}
+
+dns_lookup() {
+    local domain="$1"
+    echo -e "${AMBER}DNS Records${NC}"
+
+    for type in A AAAA MX NS TXT SOA CNAME; do
+        result=$(torsocks dig +short "$domain" "$type" @9.9.9.9 2>/dev/null)
+        if [ -n "$result" ]; then
+            echo -e "  ${GREEN}$type${NC}"
+            echo "$result" | while read -r line; do
+                echo "    $line"
+            done
+        fi
+    done
+    echo ""
+}
+
+whois_lookup() {
+    local domain="$1"
+    echo -e "${AMBER}WHOIS${NC}"
+
+    # Use a web WHOIS service through Tor (no direct whois port needed)
+    local result
+    result=$(torsocks curl -s --max-time 20 \
+        -H "User-Agent: $UA" \
+        "https://www.whois.com/whois/$domain" 2>/dev/null \
+        | python3 -c "
+import sys, re
+html = sys.stdin.read()
+# Extract the registrar data block
+match = re.search(r'<pre[^>]*id=\"registryData\"[^>]*>(.*?)</pre>', html, re.DOTALL)
+if match:
+    text = match.group(1)
+    # Strip HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    for line in text.strip().split('\n'):
+        line = line.strip()
+        if line and ':' in line:
+            print(f'  {line}')
+else:
+    print('  WHOIS data not available through web lookup')
+" 2>/dev/null)
+
+    if [ -n "$result" ]; then
+        echo "$result"
+    else
+        echo "  Could not retrieve WHOIS data"
+    fi
+    echo ""
+}
+
+cert_transparency() {
+    local domain="$1"
+    echo -e "${AMBER}Certificate Transparency Logs${NC}"
+
+    # crt.sh is the standard CT log search
+    local result
+    result=$(torsocks curl -s --max-time 30 \
+        "https://crt.sh/?q=%25.$domain&output=json" 2>/dev/null \
+        | python3 -c "
+import sys, json
+try:
+    certs = json.load(sys.stdin)
+    seen = set()
+    for cert in sorted(certs, key=lambda c: c.get('id', 0), reverse=True)[:30]:
+        name = cert.get('name_value', '')
+        issuer = cert.get('issuer_name', '')
+        not_before = cert.get('not_before', '')
+        # Deduplicate by name
+        if name not in seen:
+            seen.add(name)
+            print(f'  {name}')
+            print(f'    Issued: {not_before}  Issuer: {issuer[:60]}')
+    print(f'\n  Total unique certificates: {len(seen)}')
+except:
+    print('  Could not parse CT data')
+" 2>/dev/null)
+
+    if [ -n "$result" ]; then
+        echo "$result"
+    else
+        echo "  No CT data available"
+    fi
+    echo ""
+}
+
+http_headers() {
+    local domain="$1"
+    echo -e "${AMBER}HTTP Headers & Technology Detection${NC}"
+
+    local headers
+    headers=$(torsocks curl -s -I -L --max-time 15 \
+        -H "User-Agent: $UA" \
+        "https://$domain" 2>/dev/null)
+
+    if [ -z "$headers" ]; then
+        headers=$(torsocks curl -s -I -L --max-time 15 \
+            -H "User-Agent: $UA" \
+            "http://$domain" 2>/dev/null)
+    fi
+
+    if [ -n "$headers" ]; then
+        echo "$headers" | while read -r line; do
+            echo "  $line"
+        done
+        echo ""
+
+        # Technology detection from headers
+        echo -e "${AMBER}Detected Technologies${NC}"
+        echo "$headers" | python3 -c "
+import sys
+headers = sys.stdin.read().lower()
+
+techs = []
+if 'cloudflare' in headers: techs.append('Cloudflare CDN')
+if 'x-powered-by: php' in headers: techs.append('PHP')
+if 'x-powered-by: express' in headers: techs.append('Express.js (Node)')
+if 'x-powered-by: asp.net' in headers: techs.append('ASP.NET')
+if 'server: nginx' in headers: techs.append('Nginx')
+if 'server: apache' in headers: techs.append('Apache')
+if 'server: caddy' in headers: techs.append('Caddy')
+if 'server: cloudflare' in headers: techs.append('Cloudflare')
+if 'x-vercel' in headers: techs.append('Vercel')
+if 'x-netlify' in headers: techs.append('Netlify')
+if 'x-amz' in headers: techs.append('AWS')
+if 'x-goog' in headers: techs.append('Google Cloud')
+if 'x-azure' in headers: techs.append('Azure')
+if 'wp-' in headers or 'wordpress' in headers: techs.append('WordPress')
+if 'x-shopify' in headers: techs.append('Shopify')
+if 'x-drupal' in headers: techs.append('Drupal')
+if 'strict-transport-security' in headers: techs.append('HSTS Enabled')
+if 'content-security-policy' in headers: techs.append('CSP Enabled')
+if 'x-frame-options' in headers: techs.append('X-Frame-Options')
+if 'x-xss-protection' in headers: techs.append('XSS Protection')
+
+if techs:
+    for t in techs:
+        print(f'  [+] {t}')
+else:
+    print('  No common technologies detected from headers')
+" 2>/dev/null
+    else
+        echo "  Could not retrieve headers"
+    fi
+    echo ""
+}
+
+subdomain_discovery() {
+    local domain="$1"
+    echo -e "${AMBER}Subdomain Discovery (passive)${NC}"
+    echo -e "${GRAY}  Sources: Certificate Transparency, DNS common names${NC}"
+    echo ""
+
+    # From CT logs
+    local ct_subs
+    ct_subs=$(torsocks curl -s --max-time 30 \
+        "https://crt.sh/?q=%25.$domain&output=json" 2>/dev/null \
+        | python3 -c "
+import sys, json
+try:
+    certs = json.load(sys.stdin)
+    subs = set()
+    for cert in certs:
+        names = cert.get('name_value', '').split('\n')
+        for name in names:
+            name = name.strip().lower()
+            if name and '*' not in name:
+                subs.add(name)
+    for sub in sorted(subs):
+        print(sub)
+except:
+    pass
+" 2>/dev/null)
+
+    # Common subdomain brute check (passive, just DNS)
+    local common_subs="www mail ftp vpn api dev staging beta test admin portal shop blog cdn static media assets app login secure"
+
+    echo -e "  ${AMBER}From Certificate Transparency:${NC}"
+    if [ -n "$ct_subs" ]; then
+        echo "$ct_subs" | while read -r sub; do
+            echo "    $sub"
+        done
+        ct_count=$(echo "$ct_subs" | wc -l)
+        echo -e "  ${GREEN}Found $ct_count subdomains from CT logs${NC}"
+    else
+        echo "    None found"
+    fi
+    echo ""
+
+    echo -e "  ${AMBER}Common Subdomain DNS Check:${NC}"
+    local dns_found=0
+    for sub in $common_subs; do
+        local ip
+        ip=$(torsocks dig +short "$sub.$domain" A @9.9.9.9 2>/dev/null | head -1)
+        if [ -n "$ip" ]; then
+            printf "    ${GREEN}%-25s${NC} %s\n" "$sub.$domain" "$ip"
+            dns_found=$((dns_found + 1))
+        fi
+    done
+    echo -e "  ${GREEN}Found $dns_found active common subdomains${NC}"
+    echo ""
+}
+
+full_report() {
+    local domain="$1"
+    echo -e "${CYAN}Watson Domain Report: ${AMBER}$domain${NC}"
+    echo -e "${GRAY}All lookups routed through Tor${NC}"
+    echo ""
+
+    local output=""
+    output+=$(dns_lookup "$domain" 2>&1)$'\n'
+    output+=$(http_headers "$domain" 2>&1)$'\n'
+    output+=$(cert_transparency "$domain" 2>&1)$'\n'
+    output+=$(whois_lookup "$domain" 2>&1)$'\n'
+
+    echo "$output"
+    log_to_vault "$domain" "$output"
+}
+
+case "${1:-}" in
+    --dns)
+        [ -z "$2" ] && { usage; exit 1; }
+        dns_lookup "$2"
+        ;;
+    --certs)
+        [ -z "$2" ] && { usage; exit 1; }
+        cert_transparency "$2"
+        ;;
+    --whois)
+        [ -z "$2" ] && { usage; exit 1; }
+        whois_lookup "$2"
+        ;;
+    --headers)
+        [ -z "$2" ] && { usage; exit 1; }
+        http_headers "$2"
+        ;;
+    --subs)
+        [ -z "$2" ] && { usage; exit 1; }
+        subdomain_discovery "$2"
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        full_report "$1"
+        ;;
+esac

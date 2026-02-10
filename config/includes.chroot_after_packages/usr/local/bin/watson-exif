@@ -1,0 +1,491 @@
+#!/bin/bash
+# Watson EXIF — Extract and strip metadata from files
+# GPS coordinates, device info, timestamps, software versions
+# Everything a leaked photo can tell you about who took it and where
+
+VAULT_MOUNT="$HOME/Investigation"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+AMBER='\033[0;33m'
+NC='\033[0m'
+
+usage() {
+    echo "Watson EXIF — Metadata Extraction & Stripping"
+    echo ""
+    echo "  watson-exif <file>            Extract all metadata"
+    echo "  watson-exif --gps <file>      Extract GPS coordinates only"
+    echo "  watson-exif --device <file>   Extract device/camera info only"
+    echo "  watson-exif --strip <file>    Remove all metadata (creates clean copy)"
+    echo "  watson-exif --diff <a> <b>    Compare metadata between two files"
+    echo "  watson-exif --batch <dir>     Extract metadata from all images in directory"
+    echo ""
+    echo "Supports: JPEG, PNG, TIFF, PDF, DOCX, MP4, MOV"
+    echo "Results saved to vault if open."
+}
+
+log_to_vault() {
+    local label="$1"
+    local target="$2"
+    local result="$3"
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        local dir="$VAULT_MOUNT/evidence/exif"
+        mkdir -p "$dir"
+        local stamp=$(date +%Y%m%d_%H%M%S)
+        local safe_name=$(basename "$target" | tr ' ' '_')
+        local outfile="$dir/${stamp}_${safe_name}.txt"
+        echo "WATSON EXIF — $label" > "$outfile"
+        echo "Target: $target" >> "$outfile"
+        echo "Date: $(date -Iseconds)" >> "$outfile"
+        echo "========================================" >> "$outfile"
+        echo "$result" >> "$outfile"
+        echo -e "${GREEN}[+] Saved to vault${NC} ${GRAY}($outfile)${NC}"
+    fi
+}
+
+extract_with_python() {
+    local file="$1"
+    local mode="$2"
+    python3 << PYEOF
+import struct, sys, json, os
+from datetime import datetime
+
+def read_jpeg_exif(filepath):
+    """Extract EXIF from JPEG without external dependencies."""
+    findings = {}
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+
+        if data[:2] != b'\xff\xd8':
+            return {'error': 'Not a JPEG file'}
+
+        # Find EXIF marker (APP1 = 0xFFE1)
+        pos = 2
+        while pos < len(data) - 4:
+            marker = struct.unpack('>H', data[pos:pos+2])[0]
+            if marker == 0xFFE1:  # APP1 (EXIF)
+                length = struct.unpack('>H', data[pos+2:pos+4])[0]
+                exif_data = data[pos+4:pos+2+length]
+                findings.update(parse_exif_block(exif_data))
+                break
+            elif marker == 0xFFDA:  # Start of scan, stop
+                break
+            else:
+                if pos + 2 < len(data):
+                    length = struct.unpack('>H', data[pos+2:pos+4])[0]
+                    pos += 2 + length
+                else:
+                    break
+
+        # Also grab JFIF info
+        pos = 2
+        while pos < len(data) - 4:
+            marker = struct.unpack('>H', data[pos:pos+2])[0]
+            if marker == 0xFFE0:  # APP0 (JFIF)
+                length = struct.unpack('>H', data[pos+2:pos+4])[0]
+                jfif = data[pos+4:pos+2+length]
+                if jfif[:4] == b'JFIF':
+                    findings['JFIF Version'] = f"{jfif[5]}.{jfif[6]}"
+                break
+            elif marker == 0xFFDA:
+                break
+            else:
+                length = struct.unpack('>H', data[pos+2:pos+4])[0]
+                pos += 2 + length
+
+    except Exception as e:
+        findings['parse_error'] = str(e)
+
+    # File-level metadata
+    stat = os.stat(filepath)
+    findings['File Size'] = f"{stat.st_size:,} bytes ({stat.st_size/1024:.1f} KB)"
+    findings['File Modified'] = datetime.fromtimestamp(stat.st_mtime).isoformat()
+    findings['File Created'] = datetime.fromtimestamp(stat.st_ctime).isoformat()
+
+    return findings
+
+# EXIF tag IDs we care about
+EXIF_TAGS = {
+    0x010F: 'Camera Make',
+    0x0110: 'Camera Model',
+    0x0112: 'Orientation',
+    0x011A: 'X Resolution',
+    0x011B: 'Y Resolution',
+    0x0131: 'Software',
+    0x0132: 'DateTime',
+    0x013B: 'Artist',
+    0x8298: 'Copyright',
+    0x8769: 'ExifIFD',
+    0x8825: 'GPSIFD',
+    0x9000: 'EXIF Version',
+    0x9003: 'Date Taken',
+    0x9004: 'Date Digitized',
+    0x9207: 'Metering Mode',
+    0x9209: 'Flash',
+    0x920A: 'Focal Length',
+    0xA001: 'Color Space',
+    0xA002: 'Image Width',
+    0xA003: 'Image Height',
+    0xA210: 'Focal Plane Unit',
+    0xA431: 'Serial Number',
+    0xA432: 'Lens Info',
+    0xA433: 'Lens Make',
+    0xA434: 'Lens Model',
+    0xA435: 'Lens Serial',
+}
+
+GPS_TAGS = {
+    0x0001: 'GPS Lat Ref',
+    0x0002: 'GPS Latitude',
+    0x0003: 'GPS Lon Ref',
+    0x0004: 'GPS Longitude',
+    0x0005: 'GPS Alt Ref',
+    0x0006: 'GPS Altitude',
+    0x0007: 'GPS Timestamp',
+    0x001D: 'GPS Date',
+}
+
+def parse_exif_block(data):
+    """Parse an EXIF APP1 block."""
+    findings = {}
+    if data[:6] not in (b'Exif\x00\x00',):
+        return findings
+    tiff = data[6:]
+    if len(tiff) < 8:
+        return findings
+
+    # Byte order
+    if tiff[:2] == b'II':
+        endian = '<'
+    elif tiff[:2] == b'MM':
+        endian = '>'
+    else:
+        return findings
+
+    # First IFD offset
+    ifd_offset = struct.unpack(endian + 'I', tiff[4:8])[0]
+
+    def read_ifd(offset, tags_dict):
+        results = {}
+        if offset + 2 > len(tiff):
+            return results
+        count = struct.unpack(endian + 'H', tiff[offset:offset+2])[0]
+        for i in range(count):
+            entry_off = offset + 2 + i * 12
+            if entry_off + 12 > len(tiff):
+                break
+            tag = struct.unpack(endian + 'H', tiff[entry_off:entry_off+2])[0]
+            dtype = struct.unpack(endian + 'H', tiff[entry_off+2:entry_off+4])[0]
+            count_val = struct.unpack(endian + 'I', tiff[entry_off+4:entry_off+8])[0]
+            value_off = entry_off + 8
+
+            if tag in tags_dict:
+                name = tags_dict[tag]
+                val = read_value(dtype, count_val, value_off, endian)
+                if val is not None:
+                    results[name] = val
+                    # Follow sub-IFD pointers
+                    if name == 'ExifIFD' and isinstance(val, int):
+                        results.update(read_ifd(val, EXIF_TAGS))
+                    elif name == 'GPSIFD' and isinstance(val, int):
+                        results.update(read_ifd(val, GPS_TAGS))
+        return results
+
+    def read_value(dtype, count, value_off, endian):
+        type_sizes = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8, 12: 8}
+        sz = type_sizes.get(dtype, 0)
+        total = sz * count
+        if total > 4:
+            ptr = struct.unpack(endian + 'I', tiff[value_off:value_off+4])[0]
+            raw = tiff[ptr:ptr+total]
+        else:
+            raw = tiff[value_off:value_off+4]
+
+        if dtype == 2:  # ASCII
+            return raw[:count].rstrip(b'\x00').decode('ascii', errors='replace')
+        elif dtype == 3:  # SHORT
+            if count == 1:
+                return struct.unpack(endian + 'H', raw[:2])[0]
+            return [struct.unpack(endian + 'H', raw[i*2:i*2+2])[0] for i in range(count)]
+        elif dtype == 4:  # LONG
+            if count == 1:
+                return struct.unpack(endian + 'I', raw[:4])[0]
+            return [struct.unpack(endian + 'I', raw[i*4:i*4+4])[0] for i in range(count)]
+        elif dtype == 5:  # RATIONAL
+            vals = []
+            for i in range(count):
+                num = struct.unpack(endian + 'I', raw[i*8:i*8+4])[0]
+                den = struct.unpack(endian + 'I', raw[i*8+4:i*8+8])[0]
+                vals.append(num / den if den else 0)
+            return vals[0] if count == 1 else vals
+        return None
+
+    findings = read_ifd(ifd_offset, EXIF_TAGS)
+
+    # Clean up sub-IFD markers
+    findings.pop('ExifIFD', None)
+    findings.pop('GPSIFD', None)
+
+    return findings
+
+def dms_to_decimal(dms, ref):
+    """Convert GPS DMS to decimal degrees."""
+    if isinstance(dms, list) and len(dms) == 3:
+        dec = dms[0] + dms[1] / 60.0 + dms[2] / 3600.0
+        if ref in ('S', 'W'):
+            dec = -dec
+        return round(dec, 6)
+    return None
+
+def format_gps(findings):
+    """Format GPS data into readable coordinates."""
+    lat = findings.get('GPS Latitude')
+    lat_ref = findings.get('GPS Lat Ref', 'N')
+    lon = findings.get('GPS Longitude')
+    lon_ref = findings.get('GPS Lon Ref', 'E')
+
+    if lat and lon:
+        lat_dec = dms_to_decimal(lat, lat_ref)
+        lon_dec = dms_to_decimal(lon, lon_ref)
+        if lat_dec is not None and lon_dec is not None:
+            return {
+                'Latitude': f"{lat_dec} ({lat_ref})",
+                'Longitude': f"{lon_dec} ({lon_ref})",
+                'Google Maps': f"https://maps.google.com/?q={lat_dec},{lon_dec}",
+                'OpenStreetMap': f"https://www.openstreetmap.org/?mlat={lat_dec}&mlon={lon_dec}&zoom=15",
+            }
+    return {}
+
+def extract_pdf_metadata(filepath):
+    """Extract metadata from PDF files."""
+    findings = {}
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+
+        # Find /Info dictionary
+        idx = data.find(b'/Info')
+        if idx == -1:
+            idx = data.find(b'/Author')
+
+        # Extract common PDF metadata fields
+        for field in [b'/Author', b'/Creator', b'/Producer', b'/Title',
+                      b'/Subject', b'/CreationDate', b'/ModDate']:
+            pos = data.find(field)
+            if pos != -1:
+                # Find value between ( ) or < >
+                start = data.find(b'(', pos, pos + 200)
+                if start != -1:
+                    end = data.find(b')', start)
+                    if end != -1:
+                        val = data[start+1:end].decode('latin-1', errors='replace')
+                        name = field.decode().strip('/')
+                        findings[f'PDF {name}'] = val
+    except Exception as e:
+        findings['parse_error'] = str(e)
+
+    stat = os.stat(filepath)
+    findings['File Size'] = f"{stat.st_size:,} bytes"
+    return findings
+
+# Main
+filepath = "$file"
+mode = "$mode"
+
+if not os.path.isfile(filepath):
+    print(f"File not found: {filepath}")
+    sys.exit(1)
+
+ext = os.path.splitext(filepath)[1].lower()
+
+if ext in ('.jpg', '.jpeg', '.tiff', '.tif'):
+    findings = read_jpeg_exif(filepath)
+elif ext == '.pdf':
+    findings = extract_pdf_metadata(filepath)
+elif ext == '.png':
+    # PNG has tEXt chunks
+    findings = {'File Size': f"{os.path.getsize(filepath):,} bytes"}
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    pos = 8  # Skip PNG signature
+    while pos < len(data) - 8:
+        chunk_len = struct.unpack('>I', data[pos:pos+4])[0]
+        chunk_type = data[pos+4:pos+8].decode('ascii', errors='replace')
+        chunk_data = data[pos+8:pos+8+chunk_len]
+        if chunk_type == 'tEXt':
+            parts = chunk_data.split(b'\x00', 1)
+            if len(parts) == 2:
+                key = parts[0].decode('ascii', errors='replace')
+                val = parts[1].decode('utf-8', errors='replace')
+                findings[f'PNG {key}'] = val[:200]
+        elif chunk_type == 'iTXt':
+            parts = chunk_data.split(b'\x00', 1)
+            if len(parts) >= 1:
+                key = parts[0].decode('ascii', errors='replace')
+                findings[f'PNG {key}'] = '(compressed text block)'
+        pos += 12 + chunk_len
+else:
+    findings = {'File Size': f"{os.path.getsize(filepath):,} bytes"}
+    stat = os.stat(filepath)
+    findings['File Modified'] = datetime.fromtimestamp(stat.st_mtime).isoformat()
+
+# Format GPS if present
+gps = format_gps(findings)
+if gps:
+    findings.update(gps)
+
+# Output based on mode
+if mode == 'gps':
+    gps_fields = {k: v for k, v in findings.items() if 'GPS' in k or 'Lat' in k or 'Lon' in k or 'Maps' in k or 'Street' in k}
+    if gps_fields:
+        for k, v in gps_fields.items():
+            print(f"  {k}: {v}")
+    else:
+        print("  No GPS data found.")
+elif mode == 'device':
+    device_fields = {k: v for k, v in findings.items()
+                     if any(x in k for x in ['Make', 'Model', 'Software', 'Serial', 'Lens'])}
+    if device_fields:
+        for k, v in device_fields.items():
+            print(f"  {k}: {v}")
+    else:
+        print("  No device info found.")
+else:
+    for k, v in findings.items():
+        if isinstance(v, list):
+            v = ', '.join(str(x) for x in v)
+        print(f"  {k}: {v}")
+PYEOF
+}
+
+strip_metadata() {
+    local file="$1"
+    local ext="${file##*.}"
+    local base="${file%.*}"
+    local clean="${base}_clean.${ext}"
+
+    echo -e "${CYAN}[*] Stripping metadata from: $(basename "$file")${NC}"
+
+    # Use Python to strip EXIF from JPEG
+    python3 << PYEOF
+import struct, os, sys
+
+filepath = "$file"
+outpath = "$clean"
+ext = os.path.splitext(filepath)[1].lower()
+
+if ext in ('.jpg', '.jpeg'):
+    with open(filepath, 'rb') as f:
+        data = f.read()
+
+    if data[:2] != b'\xff\xd8':
+        print("Not a valid JPEG")
+        sys.exit(1)
+
+    # Rebuild JPEG keeping only image data (strip all APP markers)
+    out = bytearray(b'\xff\xd8')
+    pos = 2
+    while pos < len(data) - 1:
+        marker = struct.unpack('>H', data[pos:pos+2])[0]
+        if marker == 0xFFDA:  # Start of scan, copy rest
+            out.extend(data[pos:])
+            break
+        elif (marker & 0xFF00) == 0xFF00 and marker not in (0xFFD8, 0xFFD9):
+            length = struct.unpack('>H', data[pos+2:pos+4])[0]
+            # Keep DQT (FFDBx), DHT (FFC4), SOF (FFC0-FFC3), but strip APP markers
+            if marker in (0xFFDB, 0xFFC4, 0xFFC0, 0xFFC1, 0xFFC2, 0xFFC3, 0xFFDD):
+                out.extend(data[pos:pos+2+length])
+            # Skip APP0-APP15 (FFE0-FFEF) and COM (FFFE)
+            pos += 2 + length
+        else:
+            pos += 1
+
+    with open(outpath, 'wb') as f:
+        f.write(bytes(out))
+
+    orig_size = os.path.getsize(filepath)
+    clean_size = os.path.getsize(outpath)
+    print(f"  Original: {orig_size:,} bytes")
+    print(f"  Cleaned:  {clean_size:,} bytes")
+    print(f"  Removed:  {orig_size - clean_size:,} bytes of metadata")
+    print(f"  Output:   {outpath}")
+else:
+    print(f"  Stripping not yet supported for {ext} files")
+    print(f"  Supported: .jpg, .jpeg")
+PYEOF
+}
+
+batch_extract() {
+    local dir="$1"
+    echo -e "${CYAN}[*] Scanning directory: $dir${NC}"
+    echo ""
+
+    local count=0
+    local gps_count=0
+
+    for file in "$dir"/*.{jpg,jpeg,png,tiff,pdf,JPG,JPEG,PNG} 2>/dev/null; do
+        [ -f "$file" ] || continue
+        count=$((count + 1))
+        echo -e "${AMBER}$(basename "$file")${NC}"
+        result=$(extract_with_python "$file" "all")
+        echo "$result"
+
+        # Check for GPS
+        if echo "$result" | grep -q "Google Maps"; then
+            gps_count=$((gps_count + 1))
+            echo -e "  ${RED}[!] GPS DATA FOUND${NC}"
+        fi
+        echo ""
+    done
+
+    echo -e "${CYAN}Scanned $count files. $gps_count contained GPS coordinates.${NC}"
+}
+
+# Main
+case "${1:-}" in
+    --gps)
+        [ -z "$2" ] && { usage; exit 1; }
+        echo -e "${CYAN}[*] GPS extraction: $(basename "$2")${NC}"
+        result=$(extract_with_python "$2" "gps")
+        echo "$result"
+        log_to_vault "GPS Extract" "$2" "$result"
+        ;;
+    --device)
+        [ -z "$2" ] && { usage; exit 1; }
+        echo -e "${CYAN}[*] Device info: $(basename "$2")${NC}"
+        result=$(extract_with_python "$2" "device")
+        echo "$result"
+        log_to_vault "Device Info" "$2" "$result"
+        ;;
+    --strip)
+        [ -z "$2" ] && { usage; exit 1; }
+        strip_metadata "$2"
+        ;;
+    --diff)
+        [ -z "$3" ] && { echo "Usage: watson-exif --diff <file1> <file2>"; exit 1; }
+        echo -e "${CYAN}[*] Comparing metadata${NC}"
+        echo -e "${AMBER}File A: $(basename "$2")${NC}"
+        result_a=$(extract_with_python "$2" "all")
+        echo "$result_a"
+        echo ""
+        echo -e "${AMBER}File B: $(basename "$3")${NC}"
+        result_b=$(extract_with_python "$3" "all")
+        echo "$result_b"
+        ;;
+    --batch)
+        [ -z "$2" ] && { echo "Usage: watson-exif --batch <directory>"; exit 1; }
+        batch_extract "$2"
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        echo -e "${CYAN}[*] Full metadata: $(basename "$1")${NC}"
+        result=$(extract_with_python "$1" "all")
+        echo "$result"
+        log_to_vault "Full Extract" "$1" "$result"
+        ;;
+esac

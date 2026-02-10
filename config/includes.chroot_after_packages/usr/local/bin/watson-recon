@@ -1,0 +1,297 @@
+#!/bin/bash
+# Watson Recon — Telescope wrapper with vault logging
+# Routes recon through SHEILD's Claude API proxy layer
+# Logs everything into the encrypted vault automatically
+#
+# Usage:
+#   watson-recon <url>              Analyze a URL (provider mode — Claude fetches)
+#   watson-recon --tor <url>        Fetch through Tor, summarize with Claude
+#   watson-recon --ddg <query>      Search DDG only (target sees nothing)
+#   watson-recon --ask <question>   Ask Claude a direct question
+#   watson-recon --log              Show today's recon log
+
+VAULT_MOUNT="$HOME/Investigation"
+RECON_DIR="$VAULT_MOUNT/sessions"
+TODAY=$(date +%Y-%m-%d)
+RECON_LOG="$RECON_DIR/${TODAY}_recon.log"
+CONFIG="$HOME/.sheild/telescope.toml"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+NC='\033[0m'
+
+check_vault() {
+    if ! mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        echo -e "${RED}[!] Vault is locked. Opening...${NC}"
+        watson-vault open
+        if ! mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+            echo -e "${RED}[!] Could not open vault. Run 'watson-vault open' manually.${NC}"
+            exit 1
+        fi
+    fi
+    mkdir -p "$RECON_DIR"
+}
+
+log_entry() {
+    local timestamp=$(date +"%H:%M:%S")
+    local mode="$1"
+    local target="$2"
+    local result="$3"
+
+    cat >> "$RECON_LOG" << ENTRY
+
+═══════════════════════════════════════════════════
+[$timestamp] MODE: $mode | TARGET: $target
+═══════════════════════════════════════════════════
+$result
+ENTRY
+
+    echo -e "${GREEN}[+] Logged to vault${NC} ${GRAY}($RECON_LOG)${NC}"
+}
+
+read_config() {
+    if [ ! -f "$CONFIG" ]; then
+        echo -e "${RED}[!] No telescope config at $CONFIG${NC}"
+        echo "    Edit ~/.sheild/telescope.toml to set your provider."
+        exit 1
+    fi
+
+    API_KEY=$(grep '^api_key' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+    MODEL=$(grep '^model' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+    ENDPOINT=$(grep '^endpoint' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+    FORMAT=$(grep '^format' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+
+    FORMAT=${FORMAT:-anthropic}
+
+    if [ -z "$API_KEY" ] || [ "$API_KEY" = "" ]; then
+        echo -e "${RED}[!] No API key set in $CONFIG${NC}"
+        echo "    Edit ~/.sheild/telescope.toml and set your provider + API key."
+        echo "    Supports: Claude, OpenAI, Ollama, LM Studio, any OpenAI-compatible."
+        exit 1
+    fi
+}
+
+# Send a prompt to the configured LLM provider
+query_llm() {
+    local prompt="$1"
+    local encoded_prompt
+    encoded_prompt=$(echo "$prompt" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+
+    local response
+
+    if [ "$FORMAT" = "anthropic" ]; then
+        # Anthropic Claude API
+        response=$(curl -s "$ENDPOINT" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: $API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "{
+                \"model\": \"$MODEL\",
+                \"max_tokens\": 4096,
+                \"messages\": [{\"role\": \"user\", \"content\": $encoded_prompt}]
+            }" 2>/dev/null)
+
+        echo "$response" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    if 'content' in r:
+        for block in r['content']:
+            if block.get('type') == 'text':
+                print(block['text'])
+    elif 'error' in r:
+        print(f\"ERROR: {r['error']['message']}\")
+    else:
+        print(json.dumps(r, indent=2))
+except:
+    print(sys.stdin.read())
+" 2>/dev/null
+
+    elif [ "$FORMAT" = "openai" ]; then
+        # OpenAI-compatible API (OpenAI, Ollama, LM Studio, vLLM, etc.)
+        local auth_header=""
+        if [ "$API_KEY" != "none" ] && [ -n "$API_KEY" ]; then
+            auth_header="-H \"Authorization: Bearer $API_KEY\""
+        fi
+
+        response=$(eval curl -s "$ENDPOINT" \
+            -H "Content-Type: application/json" \
+            $auth_header \
+            -d "{
+                \"model\": \"$MODEL\",
+                \"max_tokens\": 4096,
+                \"messages\": [{\"role\": \"user\", \"content\": $encoded_prompt}]
+            }" 2>/dev/null)
+
+        echo "$response" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)
+    if 'choices' in r:
+        for choice in r['choices']:
+            msg = choice.get('message', {})
+            print(msg.get('content', ''))
+    elif 'error' in r:
+        err = r['error']
+        if isinstance(err, dict):
+            print(f\"ERROR: {err.get('message', str(err))}\")
+        else:
+            print(f\"ERROR: {err}\")
+    else:
+        print(json.dumps(r, indent=2))
+except:
+    print(sys.stdin.read())
+" 2>/dev/null
+
+    else
+        echo "ERROR: Unknown format '$FORMAT'. Use 'anthropic' or 'openai' in telescope.toml"
+    fi
+}
+
+# Fetch URL through Tor and send content to Claude
+tor_fetch_analyze() {
+    local url="$1"
+    echo -e "${CYAN}[*] Fetching through Tor...${NC}"
+
+    local content=$(torsocks curl -s -L --max-time 30 \
+        -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36 Brave/122" \
+        -H "Accept: text/html,application/xhtml+xml" \
+        -H "Accept-Language: en-US,en;q=0.9" \
+        -H "Sec-GPC: 1" \
+        "$url" 2>/dev/null | head -c 100000)
+
+    if [ -z "$content" ]; then
+        echo -e "${RED}[!] Tor fetch failed or returned empty${NC}"
+        return 1
+    fi
+
+    echo -e "${CYAN}[*] AI analyzing content...${NC}"
+    local prompt="You are an OSINT research assistant. Analyze this web page content and provide a structured intelligence summary. Include: key entities (people, orgs, locations), dates, relationships, and anything notable for an investigation.
+
+URL: $url
+
+Page content:
+$content"
+
+    query_llm "$prompt"
+}
+
+# Search DDG only — never touch target
+ddg_search() {
+    local query="$1"
+    echo -e "${CYAN}[*] Searching DuckDuckGo (target is never contacted)...${NC}"
+
+    local content=$(torsocks curl -s -L --max-time 20 \
+        "https://html.duckduckgo.com/html/?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")" \
+        2>/dev/null | head -c 50000)
+
+    echo -e "${CYAN}[*] Analyzing search results...${NC}"
+    local prompt="You are an OSINT research assistant. Analyze these DuckDuckGo search results and provide a structured intelligence summary. Highlight the most relevant findings, key links, and anything notable.
+
+Search query: $query
+
+Search results HTML:
+$content"
+
+    query_llm "$prompt"
+}
+
+# Provider mode — Claude fetches the URL itself
+provider_analyze() {
+    local url="$1"
+    echo -e "${CYAN}[*] Asking AI to analyze (provider's infrastructure fetches)...${NC}"
+
+    local prompt="You are an OSINT research assistant. Please visit and analyze this URL: $url
+
+Provide a structured intelligence summary including:
+- What the site/page is about
+- Key entities (people, organizations, locations)
+- Dates and timeline of events
+- Notable relationships or connections
+- Any red flags or items of investigative interest
+- Contact information if present
+
+Be thorough but concise."
+
+    query_llm "$prompt"
+}
+
+# Direct question to Claude
+ask_llm() {
+    local question="$1"
+    echo -e "${CYAN}[*] Querying AI...${NC}"
+    query_llm "$question"
+}
+
+show_log() {
+    if [ ! -f "$RECON_LOG" ]; then
+        echo "[*] No recon log for today."
+        return
+    fi
+    less "$RECON_LOG"
+}
+
+usage() {
+    echo "Watson Recon — AI-Powered OSINT with Vault Logging"
+    echo ""
+    echo "  watson-recon <url>              AI analyzes URL (provider fetches)"
+    echo "  watson-recon --tor <url>        Fetch via Tor, AI analyzes"
+    echo "  watson-recon --ddg <query>      DuckDuckGo search only (zero contact)"
+    echo "  watson-recon --ask <question>   Direct question to AI"
+    echo "  watson-recon --log              View today's recon log"
+    echo ""
+    echo "All results auto-logged to encrypted vault."
+    echo "Configure provider: ~/.sheild/telescope.toml"
+}
+
+# === Main ===
+case "${1:-}" in
+    --tor)
+        [ -z "$2" ] && { echo "[!] Usage: watson-recon --tor <url>"; exit 1; }
+        check_vault
+        read_config
+        result=$(tor_fetch_analyze "$2")
+        echo ""
+        echo "$result"
+        log_entry "TOR→CLAUDE" "$2" "$result"
+        ;;
+    --ddg)
+        shift
+        [ -z "$1" ] && { echo "[!] Usage: watson-recon --ddg <search query>"; exit 1; }
+        check_vault
+        read_config
+        result=$(ddg_search "$*")
+        echo ""
+        echo "$result"
+        log_entry "DDG (zero contact)" "$*" "$result"
+        ;;
+    --ask)
+        shift
+        [ -z "$1" ] && { echo "[!] Usage: watson-recon --ask <question>"; exit 1; }
+        check_vault
+        read_config
+        result=$(ask_llm "$*")
+        echo ""
+        echo "$result"
+        log_entry "DIRECT QUERY" "$*" "$result"
+        ;;
+    --log)
+        check_vault
+        show_log
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        # Default: provider mode (Claude fetches, not you)
+        check_vault
+        read_config
+        result=$(provider_analyze "$1")
+        echo ""
+        echo "$result"
+        log_entry "PROVIDER (Anthropic IP)" "$1" "$result"
+        ;;
+esac

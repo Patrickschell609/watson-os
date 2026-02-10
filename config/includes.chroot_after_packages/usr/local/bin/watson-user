@@ -1,0 +1,169 @@
+#!/bin/bash
+# Watson User — Username OSINT across platforms
+# Checks if a username exists on major platforms via Tor
+# No API keys needed. Just HTTP status codes.
+
+VAULT_MOUNT="$HOME/Investigation"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+AMBER='\033[0;33m'
+NC='\033[0m'
+
+usage() {
+    echo "Watson User — Username Search Across Platforms"
+    echo ""
+    echo "  watson-user <username>              Check all platforms"
+    echo "  watson-user --social <username>      Social media only"
+    echo "  watson-user --dev <username>         Developer platforms only"
+    echo "  watson-user --quick <username>       Top 10 platforms only"
+    echo ""
+    echo "All checks route through Tor. Results saved to vault."
+}
+
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+check_url() {
+    local name="$1"
+    local url="$2"
+    local expect="$3"  # "200" or "!404" or "redirect"
+
+    local code
+    code=$(torsocks curl -s -o /dev/null -w "%{http_code}" -L --max-time 15 \
+        -H "User-Agent: $UA" \
+        -H "Accept: text/html" \
+        -H "Accept-Language: en-US,en;q=0.9" \
+        "$url" 2>/dev/null)
+
+    local found=false
+    case "$expect" in
+        200)
+            [ "$code" = "200" ] && found=true ;;
+        !404)
+            [ "$code" != "404" ] && [ "$code" != "000" ] && found=true ;;
+        *)
+            [ "$code" = "200" ] && found=true ;;
+    esac
+
+    if $found; then
+        printf "  ${GREEN}[+] %-20s${NC} %s ${GRAY}(%s)${NC}\n" "$name" "$url" "$code"
+        echo "$name|$url|$code|FOUND"
+    else
+        printf "  ${GRAY}[-] %-20s${NC} ${GRAY}not found (%s)${NC}\n" "$name" "$code"
+        echo "$name|$url|$code|NOT_FOUND"
+    fi
+}
+
+run_checks() {
+    local user="$1"
+    local category="$2"
+    local results=""
+
+    echo -e "${CYAN}[*] Searching for: ${AMBER}$user${NC}"
+    echo -e "${GRAY}    All requests routed through Tor${NC}"
+    echo ""
+
+    # Social media
+    if [ "$category" = "all" ] || [ "$category" = "social" ] || [ "$category" = "quick" ]; then
+        echo -e "${AMBER}Social Media${NC}"
+        results+=$(check_url "Twitter/X" "https://x.com/$user" "!404")$'\n'
+        results+=$(check_url "Instagram" "https://www.instagram.com/$user/" "200")$'\n'
+        results+=$(check_url "TikTok" "https://www.tiktok.com/@$user" "200")$'\n'
+        results+=$(check_url "Reddit" "https://www.reddit.com/user/$user" "200")$'\n'
+        results+=$(check_url "YouTube" "https://www.youtube.com/@$user" "200")$'\n'
+        results+=$(check_url "Pinterest" "https://www.pinterest.com/$user/" "200")$'\n'
+        results+=$(check_url "Tumblr" "https://$user.tumblr.com" "200")$'\n'
+        results+=$(check_url "Mastodon.social" "https://mastodon.social/@$user" "200")$'\n'
+
+        if [ "$category" != "quick" ]; then
+            results+=$(check_url "Facebook" "https://www.facebook.com/$user" "200")$'\n'
+            results+=$(check_url "LinkedIn" "https://www.linkedin.com/in/$user" "200")$'\n'
+            results+=$(check_url "Snapchat" "https://www.snapchat.com/add/$user" "200")$'\n'
+            results+=$(check_url "Twitch" "https://www.twitch.tv/$user" "200")$'\n'
+            results+=$(check_url "Warpcast" "https://warpcast.com/$user" "200")$'\n'
+        fi
+        echo ""
+    fi
+
+    # Developer platforms
+    if [ "$category" = "all" ] || [ "$category" = "dev" ] || [ "$category" = "quick" ]; then
+        echo -e "${AMBER}Developer Platforms${NC}"
+        results+=$(check_url "GitHub" "https://github.com/$user" "200")$'\n'
+        results+=$(check_url "GitLab" "https://gitlab.com/$user" "200")$'\n'
+
+        if [ "$category" != "quick" ]; then
+            results+=$(check_url "Bitbucket" "https://bitbucket.org/$user/" "200")$'\n'
+            results+=$(check_url "npm" "https://www.npmjs.com/~$user" "200")$'\n'
+            results+=$(check_url "PyPI" "https://pypi.org/user/$user/" "200")$'\n'
+            results+=$(check_url "crates.io" "https://crates.io/users/$user" "200")$'\n'
+            results+=$(check_url "HackerOne" "https://hackerone.com/$user" "200")$'\n'
+            results+=$(check_url "Keybase" "https://keybase.io/$user" "200")$'\n'
+            results+=$(check_url "DEV.to" "https://dev.to/$user" "200")$'\n'
+            results+=$(check_url "Stack Overflow" "https://stackoverflow.com/users/$user" "!404")$'\n'
+        fi
+        echo ""
+    fi
+
+    # Other platforms
+    if [ "$category" = "all" ]; then
+        echo -e "${AMBER}Other Platforms${NC}"
+        results+=$(check_url "Medium" "https://medium.com/@$user" "200")$'\n'
+        results+=$(check_url "Substack" "https://$user.substack.com" "200")$'\n'
+        results+=$(check_url "Telegram" "https://t.me/$user" "200")$'\n'
+        results+=$(check_url "Spotify" "https://open.spotify.com/user/$user" "200")$'\n'
+        results+=$(check_url "SoundCloud" "https://soundcloud.com/$user" "200")$'\n'
+        results+=$(check_url "Flickr" "https://www.flickr.com/people/$user/" "200")$'\n'
+        results+=$(check_url "Vimeo" "https://vimeo.com/$user" "200")$'\n'
+        results+=$(check_url "Steam" "https://steamcommunity.com/id/$user" "200")$'\n'
+        results+=$(check_url "Patreon" "https://www.patreon.com/$user" "200")$'\n'
+        results+=$(check_url "Gravatar" "https://en.gravatar.com/$user" "200")$'\n'
+        results+=$(check_url "About.me" "https://about.me/$user" "200")$'\n'
+        results+=$(check_url "Linktree" "https://linktr.ee/$user" "200")$'\n'
+        echo ""
+    fi
+
+    # Summary
+    local found_count=$(echo "$results" | grep "FOUND" | grep -v "NOT_FOUND" | wc -l)
+    local total_count=$(echo "$results" | grep -c "|")
+    echo -e "${CYAN}Found $found_count matches across $total_count platforms.${NC}"
+
+    # Log to vault
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        local dir="$VAULT_MOUNT/evidence/usernames"
+        mkdir -p "$dir"
+        local stamp=$(date +%Y%m%d_%H%M%S)
+        local outfile="$dir/${stamp}_${user}.txt"
+        echo "WATSON USER SEARCH" > "$outfile"
+        echo "Username: $user" >> "$outfile"
+        echo "Date: $(date -Iseconds)" >> "$outfile"
+        echo "Found: $found_count / $total_count" >> "$outfile"
+        echo "========================================" >> "$outfile"
+        echo "$results" | grep "FOUND" | grep -v "NOT_FOUND" | while IFS='|' read -r name url code status; do
+            echo "  $name: $url" >> "$outfile"
+        done
+        echo -e "${GREEN}[+] Saved to vault${NC} ${GRAY}($outfile)${NC}"
+    fi
+}
+
+case "${1:-}" in
+    --social)
+        [ -z "$2" ] && { usage; exit 1; }
+        run_checks "$2" "social"
+        ;;
+    --dev)
+        [ -z "$2" ] && { usage; exit 1; }
+        run_checks "$2" "dev"
+        ;;
+    --quick)
+        [ -z "$2" ] && { usage; exit 1; }
+        run_checks "$2" "quick"
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        run_checks "$1" "all"
+        ;;
+esac

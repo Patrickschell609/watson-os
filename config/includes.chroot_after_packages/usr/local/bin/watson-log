@@ -1,0 +1,37 @@
+#!/bin/bash
+# Watson Session Logger
+# Timestamps and logs investigation sessions into the vault
+# Runs as a background service, captures clipboard + active window context
+
+VAULT_MOUNT="$HOME/Investigation"
+SESSION_DIR="$VAULT_MOUNT/sessions"
+LOG_FILE="$SESSION_DIR/$(date +%Y-%m-%d_%H%M%S).session.log"
+
+if ! mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+    echo "[!] Vault is not open. Run 'watson-vault open' first."
+    exit 1
+fi
+
+echo "========================================" >> "$LOG_FILE"
+echo "WATSON SESSION LOG" >> "$LOG_FILE"
+echo "Started: $(date -Iseconds)" >> "$LOG_FILE"
+echo "User: $(whoami)@$(hostname)" >> "$LOG_FILE"
+echo "========================================" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+echo "[+] Session logging started → $LOG_FILE"
+echo "    Press Ctrl+C to stop logging"
+
+# Log active window changes (captures what apps/sites the investigator is looking at)
+LAST_WINDOW=""
+while true; do
+    CURRENT_WINDOW=$(xdotool getactivewindow getwindowname 2>/dev/null || echo "unknown")
+    TIMESTAMP=$(date +"%H:%M:%S")
+
+    if [ "$CURRENT_WINDOW" != "$LAST_WINDOW" ]; then
+        echo "[$TIMESTAMP] WINDOW: $CURRENT_WINDOW" >> "$LOG_FILE"
+        LAST_WINDOW="$CURRENT_WINDOW"
+    fi
+
+    sleep 2
+done

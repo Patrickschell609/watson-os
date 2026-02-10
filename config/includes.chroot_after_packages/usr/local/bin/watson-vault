@@ -1,0 +1,182 @@
+#!/bin/bash
+# Watson Vault — Encrypted Investigation Workspace
+# Creates/opens a LUKS-encrypted container for investigation data
+# All investigation logs, notes, and evidence go here
+# If something happens to the investigator, the passphrase can be
+# shared with a trusted party to recover all work
+
+VAULT_DIR="$HOME/.watson"
+VAULT_FILE="$VAULT_DIR/vault.img"
+VAULT_MOUNT="$HOME/Investigation"
+VAULT_SIZE="512"  # MB, growable
+VAULT_NAME="watson-vault"
+
+usage() {
+    echo "Watson Vault — Encrypted Investigation Workspace"
+    echo ""
+    echo "Usage:"
+    echo "  watson-vault create [size_mb]  Create a new vault (default 512MB)"
+    echo "  watson-vault open              Unlock and mount the vault"
+    echo "  watson-vault close             Unmount and lock the vault"
+    echo "  watson-vault panic             Emergency wipe — destroys vault header"
+    echo "  watson-vault status            Show vault status"
+    echo ""
+}
+
+create_vault() {
+    local size=${1:-$VAULT_SIZE}
+
+    if [ -f "$VAULT_FILE" ]; then
+        echo "[!] Vault already exists at $VAULT_FILE"
+        echo "    Use 'watson-vault open' to unlock it"
+        exit 1
+    fi
+
+    mkdir -p "$VAULT_DIR"
+    mkdir -p "$VAULT_MOUNT"
+
+    echo "[*] Creating ${size}MB encrypted vault..."
+    dd if=/dev/urandom of="$VAULT_FILE" bs=1M count="$size" status=progress
+
+    echo ""
+    echo "[*] Setting up LUKS encryption..."
+    echo "[!] Choose a strong passphrase. This protects your investigation."
+    echo "[!] Share this passphrase with ONE trusted person in case something happens to you."
+    echo ""
+    sudo cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha512 --iter-time 5000 "$VAULT_FILE"
+
+    echo "[*] Opening vault..."
+    sudo cryptsetup luksOpen "$VAULT_FILE" "$VAULT_NAME"
+
+    echo "[*] Formatting with ext4..."
+    sudo mkfs.ext4 -L "WatsonVault" "/dev/mapper/$VAULT_NAME"
+
+    # Mount and set up directory structure
+    sudo mount "/dev/mapper/$VAULT_NAME" "$VAULT_MOUNT"
+    sudo chown $(whoami):$(whoami) "$VAULT_MOUNT"
+
+    # Create investigation structure
+    mkdir -p "$VAULT_MOUNT/sessions"
+    mkdir -p "$VAULT_MOUNT/evidence"
+    mkdir -p "$VAULT_MOUNT/notes"
+    mkdir -p "$VAULT_MOUNT/exports"
+    mkdir -p "$VAULT_MOUNT/logs"
+
+    cat > "$VAULT_MOUNT/README.txt" << 'README'
+WATSON VAULT — Encrypted Investigation Workspace
+
+/sessions/   — Auto-logged browser sessions (timestamps + URLs + context)
+/evidence/   — Saved screenshots, documents, downloads
+/notes/      — Your investigation notes and analysis
+/exports/    — Packaged reports ready to share
+/logs/       — System and application logs
+
+This vault is LUKS2 encrypted with AES-256-XTS.
+If you are reading this, someone trusted you with the passphrase.
+README
+
+    echo ""
+    echo "[+] Vault created and mounted at $VAULT_MOUNT"
+    echo "[+] Your investigation workspace is ready."
+}
+
+open_vault() {
+    if [ ! -f "$VAULT_FILE" ]; then
+        echo "[!] No vault found. Run 'watson-vault create' first."
+        exit 1
+    fi
+
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        echo "[*] Vault is already open at $VAULT_MOUNT"
+        exit 0
+    fi
+
+    mkdir -p "$VAULT_MOUNT"
+    echo "[*] Unlocking vault..."
+    sudo cryptsetup luksOpen "$VAULT_FILE" "$VAULT_NAME"
+    sudo mount "/dev/mapper/$VAULT_NAME" "$VAULT_MOUNT"
+    sudo chown $(whoami):$(whoami) "$VAULT_MOUNT"
+
+    echo "[+] Vault open at $VAULT_MOUNT"
+}
+
+close_vault() {
+    if ! mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        echo "[*] Vault is not open."
+        exit 0
+    fi
+
+    echo "[*] Syncing and closing vault..."
+    sync
+    sudo umount "$VAULT_MOUNT"
+    sudo cryptsetup luksClose "$VAULT_NAME"
+    echo "[+] Vault locked."
+}
+
+panic_wipe() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════╗"
+    echo "║  WARNING: EMERGENCY WIPE                      ║"
+    echo "║  This will destroy the vault encryption header ║"
+    echo "║  ALL investigation data will be UNRECOVERABLE  ║"
+    echo "╚═══════════════════════════════════════════════╝"
+    echo ""
+    read -p "Type 'WIPE' to confirm: " confirm
+
+    if [ "$confirm" != "WIPE" ]; then
+        echo "[*] Aborted."
+        exit 0
+    fi
+
+    # Unmount if open
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        sudo umount "$VAULT_MOUNT" 2>/dev/null
+        sudo cryptsetup luksClose "$VAULT_NAME" 2>/dev/null
+    fi
+
+    # Overwrite LUKS header (first 16MB) with random data
+    echo "[*] Destroying vault header..."
+    dd if=/dev/urandom of="$VAULT_FILE" bs=1M count=16 conv=notrunc 2>/dev/null
+
+    # Remove the file
+    shred -vfz -n 3 "$VAULT_FILE"
+    rm -f "$VAULT_FILE"
+
+    echo "[+] Vault destroyed. Data is unrecoverable."
+}
+
+status_vault() {
+    echo "Watson Vault Status"
+    echo "===================="
+
+    if [ ! -f "$VAULT_FILE" ]; then
+        echo "Vault: NOT CREATED"
+        return
+    fi
+
+    local size=$(du -h "$VAULT_FILE" | cut -f1)
+    echo "Vault file: $VAULT_FILE ($size)"
+
+    if mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        echo "Status: OPEN (mounted at $VAULT_MOUNT)"
+        local used=$(df -h "$VAULT_MOUNT" | tail -1 | awk '{print $3}')
+        local avail=$(df -h "$VAULT_MOUNT" | tail -1 | awk '{print $4}')
+        echo "Used: $used / Available: $avail"
+
+        local sessions=$(ls "$VAULT_MOUNT/sessions/" 2>/dev/null | wc -l)
+        local evidence=$(ls "$VAULT_MOUNT/evidence/" 2>/dev/null | wc -l)
+        local notes=$(ls "$VAULT_MOUNT/notes/" 2>/dev/null | wc -l)
+        echo "Sessions: $sessions | Evidence: $evidence | Notes: $notes"
+    else
+        echo "Status: LOCKED"
+    fi
+}
+
+case "${1:-}" in
+    create) create_vault "$2" ;;
+    open)   open_vault ;;
+    close)  close_vault ;;
+    panic)  panic_wipe ;;
+    status) status_vault ;;
+    *)      usage ;;
+esac

@@ -1,0 +1,319 @@
+#!/bin/bash
+# Watson Timeline — Build investigation timelines from evidence
+# Aggregates timestamps from vault logs, EXIF data, web archives, and manual entries
+# Outputs chronological view of all events in an investigation
+
+VAULT_MOUNT="$HOME/Investigation"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+AMBER='\033[0;33m'
+NC='\033[0m'
+
+usage() {
+    echo "Watson Timeline — Investigation Timeline Builder"
+    echo ""
+    echo "  watson-timeline                       Build timeline from all vault evidence"
+    echo "  watson-timeline --add <date> <event>  Add manual event"
+    echo "  watson-timeline --export              Export as CSV"
+    echo "  watson-timeline --range <start> <end> Filter by date range (YYYY-MM-DD)"
+    echo "  watson-timeline --search <keyword>    Search events"
+    echo ""
+    echo "Aggregates from: session logs, EXIF data, archive lookups,"
+    echo "domain reports, username searches, and manual entries."
+    echo "Vault must be mounted at ~/Investigation"
+}
+
+check_vault() {
+    if ! mountpoint -q "$VAULT_MOUNT" 2>/dev/null; then
+        echo -e "${RED}[!] Vault not mounted at $VAULT_MOUNT${NC}"
+        echo "    Run: watson-vault open"
+        exit 1
+    fi
+}
+
+TIMELINE_FILE="$VAULT_MOUNT/timeline/events.tsv"
+
+init_timeline() {
+    mkdir -p "$VAULT_MOUNT/timeline"
+    if [ ! -f "$TIMELINE_FILE" ]; then
+        printf "TIMESTAMP\tSOURCE\tEVENT\n" > "$TIMELINE_FILE"
+    fi
+}
+
+add_event() {
+    local date="$1"
+    local event="$2"
+
+    # Validate date format
+    if ! date -d "$date" &>/dev/null; then
+        echo -e "${RED}[!] Invalid date: $date${NC}"
+        echo "    Use: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS"
+        exit 1
+    fi
+
+    local normalized
+    normalized=$(date -d "$date" +"%Y-%m-%d %H:%M:%S")
+    printf "%s\tMANUAL\t%s\n" "$normalized" "$event" >> "$TIMELINE_FILE"
+    echo -e "${GREEN}[+] Added:${NC} $normalized  $event"
+}
+
+# Extract timestamps from vault evidence files
+scan_vault() {
+    echo -e "${CYAN}Watson Timeline Report${NC}"
+    echo -e "${GRAY}Scanning vault for timestamps...${NC}"
+    echo ""
+
+    local temp_events
+    temp_events=$(mktemp)
+
+    # Pull existing manual/previous events
+    if [ -f "$TIMELINE_FILE" ]; then
+        tail -n +2 "$TIMELINE_FILE" >> "$temp_events"
+    fi
+
+    # Scan session logs
+    if [ -d "$VAULT_MOUNT/logs" ]; then
+        local log_count=0
+        for log in "$VAULT_MOUNT/logs"/*.log; do
+            [ -f "$log" ] || continue
+            while IFS= read -r line; do
+                # Extract lines with timestamps like [2026-02-09 14:30:15]
+                if [[ "$line" =~ \[([0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2})\] ]]; then
+                    local ts="${BASH_REMATCH[1]}"
+                    local event=$(echo "$line" | sed 's/\[.*\] //')
+                    printf "%s\tSESSION\t%s\n" "$ts" "$event" >> "$temp_events"
+                    log_count=$((log_count + 1))
+                fi
+            done < "$log"
+        done
+        [ $log_count -gt 0 ] && echo -e "  ${GREEN}[+] $log_count events from session logs${NC}"
+    fi
+
+    # Scan evidence files for their creation dates
+    if [ -d "$VAULT_MOUNT/evidence" ]; then
+        local ev_count=0
+        for evidence in "$VAULT_MOUNT/evidence"/**/*.txt; do
+            [ -f "$evidence" ] || continue
+            local file_date
+            file_date=$(head -5 "$evidence" | grep -oP 'Date: \K.*' | head -1)
+            if [ -n "$file_date" ]; then
+                local normalized
+                normalized=$(date -d "$file_date" +"%Y-%m-%d %H:%M:%S" 2>/dev/null)
+                if [ -n "$normalized" ]; then
+                    local basename
+                    basename=$(basename "$evidence")
+                    local tool_name
+                    tool_name=$(head -1 "$evidence" | sed 's/WATSON //' | sed 's/ .*//')
+                    printf "%s\t%s\t%s\n" "$normalized" "$tool_name" "$basename" >> "$temp_events"
+                    ev_count=$((ev_count + 1))
+                fi
+            fi
+        done
+        [ $ev_count -gt 0 ] && echo -e "  ${GREEN}[+] $ev_count evidence files${NC}"
+    fi
+
+    # Scan EXIF extractions
+    if [ -d "$VAULT_MOUNT/evidence/exif" ]; then
+        local exif_count=0
+        for exif in "$VAULT_MOUNT/evidence/exif"/*.txt; do
+            [ -f "$exif" ] || continue
+            while IFS= read -r line; do
+                if [[ "$line" =~ DateTimeOriginal:\ (.+) ]]; then
+                    local ts="${BASH_REMATCH[1]}"
+                    local normalized
+                    normalized=$(date -d "$ts" +"%Y-%m-%d %H:%M:%S" 2>/dev/null)
+                    if [ -n "$normalized" ]; then
+                        local img
+                        img=$(grep "File:" "$exif" | head -1 | sed 's/File: //')
+                        printf "%s\tEXIF\tPhoto taken: %s\n" "$normalized" "$img" >> "$temp_events"
+                        exif_count=$((exif_count + 1))
+                    fi
+                fi
+            done < "$exif"
+        done
+        [ $exif_count -gt 0 ] && echo -e "  ${GREEN}[+] $exif_count EXIF timestamps${NC}"
+    fi
+
+    echo ""
+
+    # Sort and display
+    local total
+    total=$(wc -l < "$temp_events")
+
+    if [ "$total" -eq 0 ]; then
+        echo -e "${AMBER}No events found. Add manual events or run investigations.${NC}"
+        rm -f "$temp_events"
+        return
+    fi
+
+    echo -e "${AMBER}Timeline (${total} events, chronological)${NC}"
+    echo ""
+    printf "  ${CYAN}%-20s %-12s %s${NC}\n" "DATE" "SOURCE" "EVENT"
+    printf "  %-20s %-12s %s\n" "====================" "============" "=============================="
+
+    sort -t$'\t' -k1 "$temp_events" | while IFS=$'\t' read -r ts source event; do
+        [ -z "$ts" ] && continue
+        local color="$NC"
+        case "$source" in
+            MANUAL)  color="$GREEN" ;;
+            SESSION) color="$CYAN" ;;
+            EXIF)    color="$AMBER" ;;
+            *)       color="$GRAY" ;;
+        esac
+        printf "  %-20s ${color}%-12s${NC} %s\n" "$ts" "$source" "$event"
+    done
+
+    rm -f "$temp_events"
+    echo ""
+}
+
+export_csv() {
+    check_vault
+    init_timeline
+
+    local outfile="$VAULT_MOUNT/timeline/timeline_$(date +%Y%m%d_%H%M%S).csv"
+    echo "timestamp,source,event" > "$outfile"
+
+    # Same scan logic but output CSV
+    local temp_events
+    temp_events=$(mktemp)
+
+    if [ -f "$TIMELINE_FILE" ]; then
+        tail -n +2 "$TIMELINE_FILE" >> "$temp_events"
+    fi
+
+    # Quick scan of evidence dates
+    if [ -d "$VAULT_MOUNT/evidence" ]; then
+        for evidence in "$VAULT_MOUNT/evidence"/**/*.txt; do
+            [ -f "$evidence" ] || continue
+            local file_date
+            file_date=$(head -5 "$evidence" | grep -oP 'Date: \K.*' | head -1)
+            if [ -n "$file_date" ]; then
+                local normalized
+                normalized=$(date -d "$file_date" +"%Y-%m-%d %H:%M:%S" 2>/dev/null)
+                if [ -n "$normalized" ]; then
+                    local basename
+                    basename=$(basename "$evidence")
+                    printf "%s\tEVIDENCE\t%s\n" "$normalized" "$basename" >> "$temp_events"
+                fi
+            fi
+        done
+    fi
+
+    sort -t$'\t' -k1 "$temp_events" | while IFS=$'\t' read -r ts source event; do
+        [ -z "$ts" ] && continue
+        # Escape commas in event
+        event=$(echo "$event" | sed 's/,/;/g')
+        echo "$ts,$source,$event" >> "$outfile"
+    done
+
+    rm -f "$temp_events"
+    echo -e "${GREEN}[+] Exported to:${NC} $outfile"
+}
+
+search_events() {
+    local keyword="$1"
+    check_vault
+    init_timeline
+
+    echo -e "${CYAN}Timeline search: ${AMBER}$keyword${NC}"
+    echo ""
+
+    local found=0
+
+    # Search existing timeline
+    if [ -f "$TIMELINE_FILE" ]; then
+        while IFS=$'\t' read -r ts source event; do
+            if echo "$event" | grep -qi "$keyword"; then
+                printf "  %-20s %-12s %s\n" "$ts" "$source" "$event"
+                found=$((found + 1))
+            fi
+        done < <(tail -n +2 "$TIMELINE_FILE")
+    fi
+
+    # Search evidence files
+    if [ -d "$VAULT_MOUNT/evidence" ]; then
+        for evidence in "$VAULT_MOUNT/evidence"/**/*.txt; do
+            [ -f "$evidence" ] || continue
+            if grep -qi "$keyword" "$evidence"; then
+                local file_date
+                file_date=$(head -5 "$evidence" | grep -oP 'Date: \K.*' | head -1)
+                local normalized="unknown"
+                [ -n "$file_date" ] && normalized=$(date -d "$file_date" +"%Y-%m-%d %H:%M:%S" 2>/dev/null)
+                printf "  %-20s %-12s %s\n" "$normalized" "EVIDENCE" "$(basename "$evidence")"
+                found=$((found + 1))
+            fi
+        done
+    fi
+
+    echo ""
+    echo -e "${CYAN}Found $found matching events.${NC}"
+}
+
+range_filter() {
+    local start="$1"
+    local end="$2"
+    check_vault
+    init_timeline
+
+    echo -e "${CYAN}Timeline: ${AMBER}$start${CYAN} to ${AMBER}$end${NC}"
+    echo ""
+
+    local start_epoch end_epoch
+    start_epoch=$(date -d "$start" +%s 2>/dev/null)
+    end_epoch=$(date -d "$end 23:59:59" +%s 2>/dev/null)
+
+    if [ -z "$start_epoch" ] || [ -z "$end_epoch" ]; then
+        echo -e "${RED}[!] Invalid date range${NC}"
+        exit 1
+    fi
+
+    printf "  ${CYAN}%-20s %-12s %s${NC}\n" "DATE" "SOURCE" "EVENT"
+    printf "  %-20s %-12s %s\n" "====================" "============" "=============================="
+
+    local found=0
+    if [ -f "$TIMELINE_FILE" ]; then
+        while IFS=$'\t' read -r ts source event; do
+            local ev_epoch
+            ev_epoch=$(date -d "$ts" +%s 2>/dev/null)
+            if [ -n "$ev_epoch" ] && [ "$ev_epoch" -ge "$start_epoch" ] && [ "$ev_epoch" -le "$end_epoch" ]; then
+                printf "  %-20s %-12s %s\n" "$ts" "$source" "$event"
+                found=$((found + 1))
+            fi
+        done < <(tail -n +2 "$TIMELINE_FILE")
+    fi
+
+    echo ""
+    echo -e "${CYAN}$found events in range.${NC}"
+}
+
+case "${1:-}" in
+    --add)
+        [ -z "$2" ] || [ -z "$3" ] && { usage; exit 1; }
+        check_vault
+        init_timeline
+        add_event "$2" "${*:3}"
+        ;;
+    --export)
+        export_csv
+        ;;
+    --range)
+        [ -z "$2" ] || [ -z "$3" ] && { usage; exit 1; }
+        range_filter "$2" "$3"
+        ;;
+    --search)
+        [ -z "$2" ] && { usage; exit 1; }
+        search_events "$2"
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        check_vault
+        init_timeline
+        scan_vault
+        ;;
+esac

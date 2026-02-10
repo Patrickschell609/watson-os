@@ -7,7 +7,7 @@ chroot/
 binary/
 cache/
 .build/
-local/
+/local/
 
 # Veritas has its own repo
 veritas/
