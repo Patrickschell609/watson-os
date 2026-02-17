@@ -1,20 +1,35 @@
-# Watson OS
+<p align="center">
+  <img src="assets/boot-splash.jpeg" alt="Watson OS" width="300">
+</p>
 
-A 508MB live investigation OS for journalists. Boot from USB, investigate, shut down, leave no trace.
+<h1 align="center">Watson OS</h1>
 
-Debian Bookworm. Tor-only networking. No offensive tools. No telemetry. No bloat.
+<p align="center">
+  <strong>A 508MB live investigation OS for journalists.</strong><br>
+  Boot from USB. Investigate. Shut down. Leave no trace.
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Platform](https://img.shields.io/badge/platform-x86__64-lightgrey)
-![Size](https://img.shields.io/badge/ISO-508MB-green)
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
+  <img src="https://img.shields.io/badge/platform-x86__64-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/ISO-508MB-green" alt="Size">
+  <img src="https://img.shields.io/badge/base-Debian%20Bookworm-red" alt="Base">
+  <img src="https://img.shields.io/badge/network-Tor%20only-7D4698" alt="Tor">
+</p>
+
+---
 
 ## What This Is
 
-Watson OS is a bootable Linux ISO built for one job: secure open-source investigation. It ships three custom tools on a hardened Debian base with all traffic forced through Tor.
+Watson OS is a bootable Linux ISO built for one job: secure open-source investigation. It ships custom tools on a hardened Debian base with all traffic forced through Tor.
 
 It is not a pentesting distro. There are no exploit frameworks, no password crackers, no packet injection tools. This is a research workstation, not a weapon.
 
 **Who it's for:** Investigative journalists, OSINT researchers, human rights investigators, anyone who needs to research sensitive topics without exposing themselves or their sources.
+
+> If this OS is seized during a raid, the package list speaks for itself. Research tools. No weapons.
+
+---
 
 ## The Tools
 
@@ -22,27 +37,26 @@ It is not a pentesting distro. There are no exploit frameworks, no password crac
 
 Custom browser built with Tauri and Rust on WebKit. It is the only browser on the system. No Firefox. No Chromium.
 
-What it does:
+**What it does:**
 - Routes all traffic through Tor (enforced at the OS level, not optional)
 - Fingerprint poisoning: randomizes canvas, WebGL, audio context, and timezone data on every session
 - Strips 60+ tracking headers before requests leave the machine
 - Ghost Mode: headless Chromium via Playwright for targets that block Tor exit nodes. Rotates identity per request.
 
-What it does not do:
+**What it does not do:**
 - No JavaScript consent popups (stripped)
 - No cookie persistence across sessions
 - No WebRTC (disabled at the engine level, prevents IP leaks)
 
 ### Telescope (AI Research Proxy)
 
-Built into SHEILD. Lets you point an LLM at a target URL and get a summary without your machine ever touching the target.
+Built into SHEILD. Point an LLM at a target URL and get a summary without your machine ever touching the target.
 
-How it works:
 1. You give Telescope a URL and a question
 2. The configured AI provider (Claude, GPT, Ollama, or any OpenAI-compatible API) fetches and reads the page
 3. You get the answer. Your IP never appears in the target's access logs.
 
-The security model: the AI provider sees your prompt but not your identity (Tor). The target sees the AI provider's IP but not yours. Neither side gets the full picture.
+**The security model:** the AI provider sees your prompt but not your identity (Tor). The target sees the AI provider's IP but not yours. Neither side gets the full picture.
 
 Supports local models (Ollama, LM Studio) for air-gapped operation. Config lives at `~/.sheild/telescope.toml`.
 
@@ -50,23 +64,19 @@ Supports local models (Ollama, LM Studio) for air-gapped operation. Config lives
 
 9-method video analysis pipeline for verifying media authenticity. Built in Python with a Rust core for the heavy lifting.
 
-Methods include:
 - Facial landmark consistency analysis (mediapipe)
 - Audio-visual sync drift detection
 - Compression artifact analysis
 - Temporal coherence checks
 - Metadata forensics
 
-Usage:
 ```bash
 watson-verify video.mp4              # Analyze local file
 watson-verify https://youtu.be/...   # Download and analyze
 watson-verify --gui                  # Graphical interface
 ```
 
-Reports auto-save to `~/Investigation/evidence/veritas/` when the investigation vault is mounted.
-
-Python dependencies install on first boot (saves 300MB from the ISO).
+Reports auto-save to `~/Investigation/evidence/veritas/` when the investigation vault is mounted. Python dependencies install on first boot (saves 300MB from the ISO).
 
 ### Ghost Analyst (OSINT Intelligence Platform)
 
@@ -83,7 +93,6 @@ Uses the same Telescope AI config as SHEILD. Results save to `~/Investigation/an
 
 Custom GPU-accelerated text editor built with wgpu and Rust. This is the default text editor on Watson OS. No Gedit, no Mousepad, no Vim.
 
-What it does:
 - Syntax highlighting for Python, Rust, JavaScript, Bash, JSON, HTML, CSS, and more
 - Tabbed editing with drag-and-drop file support
 - Full undo/redo, search, select all, clipboard integration
@@ -96,7 +105,7 @@ ghost-code notes.md           # Open a file
 ghost-code *.py               # Open multiple files in tabs
 ```
 
-### CLI Tools
+### CLI Toolkit
 
 | Command | What it does |
 |---------|-------------|
@@ -112,11 +121,11 @@ ghost-code *.py               # Open multiple files in tabs
 | `watson-vault` | LUKS2 encrypted evidence management |
 | `ghost-code` | Text editor with syntax highlighting |
 
+---
+
 ## Network Security
 
 All network traffic is forced through Tor at the kernel level. This is not a browser setting. It is an iptables firewall that drops everything that is not Tor.
-
-### How it works
 
 ```
 ┌─────────────────────────────────────────┐
@@ -142,7 +151,7 @@ All network traffic is forced through Tor at the kernel level. This is not a bro
 Everything else: DROP + LOG
 ```
 
-### Firewall rules
+**Firewall rules:**
 
 - Default policy: DROP on INPUT, FORWARD, and OUTPUT
 - Only the Tor process (matched by `debian-tor` UID) can reach the internet
@@ -152,7 +161,7 @@ Everything else: DROP + LOG
 - IPv6: disabled system-wide (Tor does not support it, and it leaks identity)
 - Dropped packets are logged with `[WATSON DROP]` prefix for auditing
 
-### What this prevents
+**What this prevents:**
 
 - DNS leaks (all DNS goes through Tor, not your ISP)
 - WebRTC IP leaks (disabled in SHEILD, blocked by firewall even if re-enabled)
@@ -160,11 +169,15 @@ Everything else: DROP + LOG
 - IPv6 leaks (disabled in sysctl)
 - Application-level bypasses (the firewall does not care what app made the request)
 
+---
+
 ## System Hardening
 
-Beyond the firewall, Watson OS applies 30+ kernel and system-level hardening measures:
+Watson OS applies 30+ kernel and system-level hardening measures beyond the firewall.
 
-**Kernel (sysctl):**
+<details>
+<summary><strong>Kernel (sysctl)</strong></summary>
+
 - ASLR set to maximum (`randomize_va_space = 2`)
 - No IP forwarding
 - No ICMP redirects (prevents MITM)
@@ -177,27 +190,60 @@ Beyond the firewall, Watson OS applies 30+ kernel and system-level hardening mea
 - ptrace restricted (`yama.ptrace_scope = 2`)
 - Magic SysRq disabled
 - Core dumps disabled system-wide
+</details>
 
-**Services:**
+<details>
+<summary><strong>Services</strong></summary>
+
 - avahi (mDNS) disabled and masked. It broadcasts your hostname on the local network.
 - CUPS (printing) disabled and masked. Attack surface with no investigative value.
 - Bluetooth disabled and masked
 - Telemetry and popularity-contest removed
 - motd-news disabled
+</details>
 
-**Login:**
+<details>
+<summary><strong>Login</strong></summary>
+
 - Root account locked. Use sudo.
 - `/tmp` mounted noexec, nosuid, nodev
 - Autologin to `watson` user (live session, no password prompt to shoulder-surf)
+</details>
+
+---
 
 ## Theme
 
-Mountain Cabin. Dark wood, amber lamplight, cream text. Designed for long sessions in low light. Not flashy, not distracting.
+<p align="center">
+  <img src="assets/wallpaper.jpeg" alt="Mountain Cabin - Watson OS Desktop" width="700">
+</p>
+
+<p align="center"><em>Mountain Cabin. Dark wood, amber lamplight, cream text.<br>Designed for long sessions in low light.</em></p>
 
 - GTK3 + GTK2 + XFWM4 theme included
 - XFCE4 Terminal: Liberation Mono, amber cursor, dark background
 - LightDM greeter with investigation-themed boot splash
 - Bottom panel, thin, dark
+
+---
+
+## Comparison
+
+| | Watson OS | Tails | Whonix |
+|---|---|---|---|
+| **Size** | 508MB | ~1.3GB | ~2GB+ (two VMs) |
+| **Tor enforcement** | iptables, kernel-level | iptables, kernel-level | Separate gateway VM |
+| **Browser** | SHEILD (custom, fingerprint poisoning) | Tor Browser | Tor Browser |
+| **AI integration** | Telescope (built-in proxy) | None | None |
+| **Deepfake detection** | Veritas (9-method) | None | None |
+| **OSINT tools** | Ghost Analyst, watson-recon | None (by design) | None |
+| **Offensive tools** | None | None | None |
+| **Target user** | Investigative journalists | Anyone needing anonymity | Privacy-focused users |
+| **Persistence** | Live only (no install) | Optional encrypted persistence | Full install |
+
+Watson OS is not trying to replace Tails or Whonix. Tails is for general anonymity. Whonix is for compartmentalized privacy. Watson OS is specifically for investigation work: researching targets, verifying media, analyzing patterns, all without exposing the journalist.
+
+---
 
 ## Architecture
 
@@ -214,6 +260,9 @@ Watson OS is built with Debian `live-build`. The ISO is assembled through a seri
 | `0600-ghost-code` | Ghost Code: text editor, file associations, default editor |
 | `9999-final-cleanup` | Wipe apt cache and temp files |
 
+<details>
+<summary><strong>File layout</strong></summary>
+
 Custom binaries and assets are placed via `config/includes.chroot_after_packages/`:
 ```
 opt/
@@ -227,6 +276,37 @@ usr/
   share/backgrounds/  Mountain cabin wallpaper
   share/watson/       Boot splash
 ```
+</details>
+
+<details>
+<summary><strong>Package list</strong></summary>
+
+Every package is justified. Nothing extra.
+
+**Desktop:** XFCE4 (session, panel, settings, terminal, screenshooter, window manager, file manager, LightDM)
+
+**Display:** xorg core, libinput, fbdev, vesa (covers bare metal and VMs)
+
+**Network:** NetworkManager, Tor, torsocks, iptables, UFW
+
+**Browser runtime:** WebKit2GTK 4.1, GTK3, librsvg, Node.js (Ghost Mode)
+
+**Encryption:** cryptsetup, GnuPG, OpenSSH client, KeePassXC, AppArmor
+
+**Media:** PulseAudio, VLC (investigators watch/listen to source material)
+
+**Filesystem:** gvfs, udisks2, NTFS, exFAT (read evidence drives)
+
+**Python:** python3, pip, venv (for Veritas)
+
+**Veritas deps:** ffmpeg, tesseract-ocr, python3-tk
+
+**Utilities:** git, curl, wget, htop, file, unzip, rsync
+
+**Fonts:** Liberation (one readable set, nothing else)
+</details>
+
+---
 
 ## Building
 
@@ -276,47 +356,7 @@ Replace `/dev/sdX` with your USB device. Double check. `dd` does not ask for con
 qemu-system-x86_64 -m 2G -cdrom watson-os-amd64.hybrid.iso
 ```
 
-## Package List
-
-Every package is justified. Nothing extra.
-
-**Desktop:** XFCE4 (session, panel, settings, terminal, screenshooter, window manager, file manager, LightDM)
-
-**Display:** xorg core, libinput, fbdev, vesa (covers bare metal and VMs)
-
-**Network:** NetworkManager, Tor, torsocks, iptables, UFW
-
-**Browser runtime:** WebKit2GTK 4.1, GTK3, librsvg, Node.js (Ghost Mode)
-
-**Encryption:** cryptsetup, GnuPG, OpenSSH client, KeePassXC, AppArmor
-
-**Media:** PulseAudio, VLC (investigators watch/listen to source material)
-
-**Filesystem:** gvfs, udisks2, NTFS, exFAT (read evidence drives)
-
-**Python:** python3, pip, venv (for Veritas)
-
-**Veritas deps:** ffmpeg, tesseract-ocr, python3-tk
-
-**Utilities:** git, curl, wget, htop, file, unzip, rsync
-
-**Fonts:** Liberation (one readable set, nothing else)
-
-## Comparison to Alternatives
-
-| | Watson OS | Tails | Whonix |
-|---|---|---|---|
-| **Size** | 508MB | ~1.3GB | ~2GB+ (two VMs) |
-| **Tor enforcement** | iptables, kernel-level | iptables, kernel-level | Separate gateway VM |
-| **Browser** | SHEILD (custom, fingerprint poisoning) | Tor Browser | Tor Browser |
-| **AI integration** | Telescope (built-in proxy) | None | None |
-| **Deepfake detection** | Veritas (9-method) | None | None |
-| **OSINT tools** | Ghost Analyst, watson-recon | None (by design) | None |
-| **Offensive tools** | None | None | None |
-| **Target user** | Investigative journalists | Anyone needing anonymity | Privacy-focused users |
-| **Persistence** | Live only (no install) | Optional encrypted persistence | Full install |
-
-Watson OS is not trying to replace Tails or Whonix. Tails is for general anonymity. Whonix is for compartmentalized privacy. Watson OS is specifically for investigation work: researching targets, verifying media, analyzing patterns, all without exposing the journalist.
+---
 
 ## What This Is Not
 
@@ -324,8 +364,6 @@ Watson OS is not trying to replace Tails or Whonix. Tails is for general anonymi
 - Not a daily driver (it is a live ISO, not an installed OS)
 - Not a general-purpose anonymity tool (use Tails for that)
 - Not audited by a third party (yet)
-
-If this OS is seized during a raid, the package list speaks for itself. Research tools. No weapons.
 
 ## Project Status
 
